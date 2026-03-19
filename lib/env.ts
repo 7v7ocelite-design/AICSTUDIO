@@ -4,8 +4,8 @@ const getEnv = (name: string): string => {
 };
 
 export const publicEnv = {
-  supabaseUrl: getEnv("NEXT_PUBLIC_SUPABASE_URL"),
-  supabaseAnonKey: getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+  supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
 };
 
 export const serverEnv = {
