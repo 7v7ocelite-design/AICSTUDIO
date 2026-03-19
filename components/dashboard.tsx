@@ -6,7 +6,7 @@ import type { Athlete, DashboardBootstrap, Job, Template } from "@/lib/types";
 
 interface DashboardProps {
   accessToken: string;
-  onSignOut: () => Promise<void>;
+  onSignOut: () => Promise<unknown>;
 }
 
 const statusClassMap: Record<string, string> = {
@@ -47,10 +47,11 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
       if (!response.ok || !payload.data) {
         throw new Error(payload.error ?? "Failed to load dashboard data.");
       }
+      const bootstrap = payload.data;
 
-      setData(payload.data);
-      setSelectedAthlete((current) => current || payload.data.athletes[0]?.id || "");
-      setSelectedTemplate((current) => current || payload.data.templates[0]?.id || "");
+      setData(bootstrap);
+      setSelectedAthlete((current) => current || bootstrap.athletes[0]?.id || "");
+      setSelectedTemplate((current) => current || bootstrap.templates[0]?.id || "");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load dashboard.");
     } finally {
