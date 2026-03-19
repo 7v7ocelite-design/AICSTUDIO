@@ -44,7 +44,7 @@ export default function GeneratePage() {
         setTemplates(templatesPayload.templates ?? []);
         setAthleteId(athletesPayload.athletes?.[0]?.id ?? "");
         setTemplateId(templatesPayload.templates?.[0]?.id ?? "");
-      } catch (error) {
+      } catch {
         toast.error("Failed to load generation inputs.");
       } finally {
         setIsLoadingData(false);
@@ -140,7 +140,7 @@ export default function GeneratePage() {
       }
 
       setResult(latestResult);
-    } catch (error) {
+    } catch {
       toast.error("Generation stream failed. Please try again.");
     } finally {
       setIsGenerating(false);

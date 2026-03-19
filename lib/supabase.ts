@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -10,13 +9,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn("Supabase URL or anon key missing from environment variables.");
 }
 
-export const supabase = createClient<Database>(
+export const supabase = createClient(
   supabaseUrl ?? "https://udayfshvdiblulpbboir.supabase.co",
   supabaseAnonKey ?? "missing-anon-key"
 );
 
 export const getServerSupabase = () =>
-  createClient<Database>(
+  createClient(
     supabaseUrl ?? "https://udayfshvdiblulpbboir.supabase.co",
     supabaseServiceKey ?? supabaseAnonKey ?? "missing-service-key",
     {
