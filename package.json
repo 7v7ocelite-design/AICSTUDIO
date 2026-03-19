@@ -1,0 +1,36 @@
+{
+  "name": "aic-content-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AiC Content Studio - AI video production dashboard for Athletes in Control",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "seed:templates": "tsx scripts/seed-templates.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.3",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.3.1",
+    "lucide-react": "^0.577.0",
+    "next": "^14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
