@@ -38,8 +38,7 @@ export async function POST(request: NextRequest) {
       .filter(([, value]) => value !== undefined && value !== "")
       .map(([key, value]) => ({
         key,
-        value,
-        created_at: new Date().toISOString()
+        value
       }));
 
     if (upserts.length > 0) {
