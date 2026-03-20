@@ -47,11 +47,12 @@ export interface Job {
   video_url: string | null;
   engine_used: string | null;
   file_name: string | null;
+  output_filename: string | null;
   retry_count: number;
   created_at: string;
   reviewed_at: string | null;
   athlete?: Pick<Athlete, "name"> | null;
-  template?: Pick<Template, "variant_name" | "category"> | null;
+  template?: Pick<Template, "variant_name" | "category" | "location"> | null;
 }
 
 export type SettingKey =

@@ -12,12 +12,12 @@ export async function GET(request: NextRequest) {
     const [{ data: athletes, error: athleteError }, { data: templates, error: templateError }, { data: jobs, error: jobsError }, { data: settings, error: settingsError }] =
       await Promise.all([
         supabase.from("athletes").select("*").order("created_at", { ascending: false }),
-        supabase.from("templates").select("*").order("created_at", { ascending: false }),
+        supabase.from("templates").select("*").order("category").order("variant_name"),
         supabase
           .from("jobs")
-          .select("*, athlete:athletes(name), template:templates(variant_name, category)")
+          .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
           .order("created_at", { ascending: false })
-          .limit(25),
+          .limit(50),
         supabase.from("settings").select("key, value")
       ]);
 

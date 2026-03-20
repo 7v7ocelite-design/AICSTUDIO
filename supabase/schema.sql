@@ -40,6 +40,7 @@ create table if not exists jobs (
   video_url text,
   engine_used text,
   file_name text,
+  output_filename text,
   retry_count integer default 0,
   created_at timestamp with time zone default now(),
   reviewed_at timestamp with time zone
