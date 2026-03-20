@@ -28,7 +28,7 @@ const formatDate = (dateString: string) =>
     minute: "2-digit"
   }).format(new Date(dateString));
 
-export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
+export const Dashboard = ({ accessToken }: DashboardProps) => {
   const [data, setData] = useState<DashboardBootstrap | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,6 +37,8 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [notice, setNotice] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAthleteForm, setShowAthleteForm] = useState(false);
+  const [showTemplateForm, setShowTemplateForm] = useState(false);
 
   const fetchBootstrap = useCallback(async () => {
     setLoading(true);
@@ -215,6 +217,7 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
+      {/* Header */}
       <header className="panel flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-4">
           <Image src="/aic-logo.png" alt="AiC" width={72} height={48} className="h-12 w-auto rounded" />
@@ -225,23 +228,19 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            className="button-secondary flex items-center gap-2"
-            onClick={() => setShowSettings(!showSettings)}
-            type="button"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-            </svg>
-            Settings
-          </button>
-          <button className="button-secondary" onClick={() => void onSignOut()} type="button">
-            Sign Out
-          </button>
-        </div>
+        <button
+          className="button-secondary flex items-center gap-2"
+          onClick={() => setShowSettings(!showSettings)}
+          type="button"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+          </svg>
+          Settings
+        </button>
       </header>
 
+      {/* Settings Panel */}
       {showSettings && (
         <SettingsPanel
           accessToken={accessToken}
@@ -249,12 +248,36 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
         />
       )}
 
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-center">
+          <p className="text-2xl font-bold text-white">{data.athletes.length}</p>
+          <p className="text-xs text-slate-400 mt-1">Athletes</p>
+        </div>
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-center">
+          <p className="text-2xl font-bold text-white">{data.templates.length}</p>
+          <p className="text-xs text-slate-400 mt-1">Templates</p>
+        </div>
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-center">
+          <p className="text-2xl font-bold text-emerald-400">{data.jobs.filter((j) => j.status === "approved").length}</p>
+          <p className="text-xs text-slate-400 mt-1">Approved</p>
+        </div>
+        <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 text-center">
+          <p className="text-2xl font-bold text-amber-400">{data.jobs.filter((j) => j.status === "needs_review").length}</p>
+          <p className="text-xs text-slate-400 mt-1">Needs Review</p>
+        </div>
+      </div>
+
+      {/* Generation + Jobs */}
       <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-        <div className="panel space-y-5">
-          <h2 className="text-lg font-semibold">One-Click Video Generation</h2>
+        <div className="panel space-y-5 border-l-4 border-l-accent">
+          <div>
+            <h2 className="text-lg font-semibold">Generate Video</h2>
+            <p className="text-xs text-muted mt-1">Select athlete + template, then launch one-click AI video production.</p>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm text-slate-300" htmlFor="athlete-select">
+              <label className="text-xs font-medium text-slate-400" htmlFor="athlete-select">
                 Athlete
               </label>
               <select
@@ -272,7 +295,7 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-slate-300" htmlFor="template-select">
+              <label className="text-xs font-medium text-slate-400" htmlFor="template-select">
                 Template
               </label>
               <select
@@ -343,55 +366,78 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
         </div>
       </section>
 
+      {/* Collapsible Forms */}
       <section className="grid gap-6 lg:grid-cols-2">
-        <form className="panel space-y-4" onSubmit={createAthlete}>
-          <h3 className="text-lg font-semibold">Add Athlete</h3>
-          <input className="input" name="name" placeholder="Name" required />
-          <input className="input" name="position" placeholder="Position" />
-          <input className="input" name="class_year" placeholder="Class Year" />
-          <input className="input" name="state" placeholder="State" />
-          <textarea
-            className="input min-h-24"
-            name="descriptor"
-            placeholder="Physical descriptor for prompt assembly"
-            required
-          />
-          <input className="input" name="style_preference" placeholder="Style preference (e.g. streetwear)" />
-          <label className="flex items-center gap-2 text-sm text-slate-200">
-            <input className="h-4 w-4" name="consent_signed" type="checkbox" value="true" />
-            Signed consent &amp; usage release on file
-          </label>
-          <div className="space-y-1">
-            <label className="text-xs text-muted" htmlFor="reference-photo">
-              Reference Photo
-            </label>
-            <input id="reference-photo" className="input p-2" name="reference_photo" type="file" accept="image/*" />
-          </div>
-          <button className="button-secondary w-full" type="submit">
-            Save Athlete
+        <div className="panel">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between text-left"
+            onClick={() => setShowAthleteForm(!showAthleteForm)}
+          >
+            <h3 className="text-lg font-semibold">Add Athlete</h3>
+            <span className="text-slate-400 text-sm">{showAthleteForm ? "▲" : "▼"}</span>
           </button>
-        </form>
+          {showAthleteForm && (
+            <form className="mt-4 space-y-4" onSubmit={createAthlete}>
+              <input className="input" name="name" placeholder="Name" required />
+              <input className="input" name="position" placeholder="Position" />
+              <input className="input" name="class_year" placeholder="Class Year" />
+              <input className="input" name="state" placeholder="State" />
+              <textarea
+                className="input min-h-24"
+                name="descriptor"
+                placeholder="Physical descriptor for prompt assembly"
+                required
+              />
+              <input className="input" name="style_preference" placeholder="Style preference (e.g. streetwear)" />
+              <label className="flex items-center gap-2 text-sm text-slate-200">
+                <input className="h-4 w-4" name="consent_signed" type="checkbox" value="true" />
+                Signed consent &amp; usage release on file
+              </label>
+              <div className="space-y-1">
+                <label className="text-xs text-muted" htmlFor="reference-photo">
+                  Reference Photo
+                </label>
+                <input id="reference-photo" className="input p-2" name="reference_photo" type="file" accept="image/*" />
+              </div>
+              <button className="button-secondary w-full" type="submit">
+                Save Athlete
+              </button>
+            </form>
+          )}
+        </div>
 
-        <form className="panel space-y-4" onSubmit={createTemplate}>
-          <h3 className="text-lg font-semibold">Add Template</h3>
-          <input className="input" name="category" placeholder="Category" required />
-          <input className="input" name="variant_name" placeholder="Variant name" required />
-          <textarea className="input min-h-20" name="action" placeholder="Action" required />
-          <input className="input" name="location" placeholder="Location" required />
-          <input className="input" name="wardrobe" placeholder="Wardrobe" required />
-          <input className="input" name="lighting" placeholder="Lighting" required />
-          <input className="input" name="camera_angle" placeholder="Camera angle" required />
-          <input className="input" name="audio_track" placeholder="Audio track filename (optional)" />
-          <select className="input" defaultValue="standard" name="content_tier" required>
-            <option value="standard">standard</option>
-            <option value="premium">premium</option>
-            <option value="social">social</option>
-          </select>
-          <input className="input" name="platforms" placeholder="Platforms (e.g. TikTok, Reels, YT)" />
-          <button className="button-secondary w-full" type="submit">
-            Save Template
+        <div className="panel">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between text-left"
+            onClick={() => setShowTemplateForm(!showTemplateForm)}
+          >
+            <h3 className="text-lg font-semibold">Add Template</h3>
+            <span className="text-slate-400 text-sm">{showTemplateForm ? "▲" : "▼"}</span>
           </button>
-        </form>
+          {showTemplateForm && (
+            <form className="mt-4 space-y-4" onSubmit={createTemplate}>
+              <input className="input" name="category" placeholder="Category" required />
+              <input className="input" name="variant_name" placeholder="Variant name" required />
+              <textarea className="input min-h-20" name="action" placeholder="Action" required />
+              <input className="input" name="location" placeholder="Location" required />
+              <input className="input" name="wardrobe" placeholder="Wardrobe" required />
+              <input className="input" name="lighting" placeholder="Lighting" required />
+              <input className="input" name="camera_angle" placeholder="Camera angle" required />
+              <input className="input" name="audio_track" placeholder="Audio track filename (optional)" />
+              <select className="input" defaultValue="standard" name="content_tier" required>
+                <option value="standard">standard</option>
+                <option value="premium">premium</option>
+                <option value="social">social</option>
+              </select>
+              <input className="input" name="platforms" placeholder="Platforms (e.g. TikTok, Reels, YT)" />
+              <button className="button-secondary w-full" type="submit">
+                Save Template
+              </button>
+            </form>
+          )}
+        </div>
       </section>
     </main>
   );
