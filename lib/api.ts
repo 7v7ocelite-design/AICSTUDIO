@@ -29,14 +29,8 @@ export const requireBearerToken = (request: NextRequest): string => {
 };
 
 export const requireAuthenticatedOperator = async (request: NextRequest): Promise<string> => {
-  const token = requireBearerToken(request);
-  const supabase = getAdminSupabase();
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) {
-    throw new HttpError(401, "Invalid or expired auth token.");
-  }
-
-  return data.user.id;
+  // Auth disabled — allow all requests through.
+  return "no-auth";
 };
 
 export const mapApiError = (error: unknown): { status: number; message: string } => {

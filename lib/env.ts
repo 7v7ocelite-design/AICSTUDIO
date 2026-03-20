@@ -1,7 +1,5 @@
-const getEnv = (name: string): string => {
-  const value = process.env[name];
-  return value ?? "";
-};
+// NEXT_PUBLIC_ vars MUST be accessed as static literals for Next.js to inline them at build time.
+// Using process.env[variable] does NOT work — Next.js cannot resolve dynamic keys.
 
 export const publicEnv = {
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
@@ -9,12 +7,12 @@ export const publicEnv = {
 };
 
 export const serverEnv = {
-  serviceRoleKey: getEnv("SUPABASE_SERVICE_ROLE_KEY"),
-  klingApiKey: getEnv("KLING_API_KEY"),
-  runwayApiKey: getEnv("RUNWAY_API_KEY"),
-  viduApiKey: getEnv("VIDU_API_KEY"),
-  anthropicApiKey: getEnv("ANTHROPIC_API_KEY"),
-  n8nWebhookUrl: getEnv("N8N_WEBHOOK_URL")
+  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  klingApiKey: process.env.KLING_API_KEY ?? "",
+  runwayApiKey: process.env.RUNWAY_API_KEY ?? "",
+  viduApiKey: process.env.VIDU_API_KEY ?? "",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  n8nWebhookUrl: process.env.N8N_WEBHOOK_URL ?? ""
 };
 
 export const hasPublicSupabase = Boolean(publicEnv.supabaseUrl && publicEnv.supabaseAnonKey);

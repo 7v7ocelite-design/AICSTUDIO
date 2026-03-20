@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 
 import type { Athlete, DashboardBootstrap, Job, Template } from "@/lib/types";
 
@@ -210,11 +211,14 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
       <header className="panel flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">AiC Content Studio</h1>
-          <p className="mt-1 text-sm text-muted">
-            Select athlete + template and launch fully automated AI lifestyle video production.
-          </p>
+        <div className="flex items-center gap-4">
+          <Image src="/aic-logo.png" alt="AiC" width={72} height={48} className="h-12 w-auto rounded" />
+          <div>
+            <h1 className="text-2xl font-semibold">Content Studio</h1>
+            <p className="mt-1 text-sm text-muted">
+              Select athlete + template and launch fully automated AI lifestyle video production.
+            </p>
+          </div>
         </div>
         <button className="button-secondary" onClick={() => void onSignOut()} type="button">
           Sign Out

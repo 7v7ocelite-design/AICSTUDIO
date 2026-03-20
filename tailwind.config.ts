@@ -5,10 +5,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#06090f",
-        surface: "#111827",
-        card: "#1f2937",
-        accent: "#38bdf8",
+        background: "#0A0A0A",
+        surface: "#1A1A1A",
+        card: "#242424",
+        accent: "#E31B23",
+        "accent-hover": "#FF2D35",
         text: "#f3f4f6",
         muted: "#9ca3af"
       }

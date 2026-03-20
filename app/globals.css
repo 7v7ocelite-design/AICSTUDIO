@@ -11,21 +11,21 @@ body {
 }
 
 a {
-  @apply text-accent transition hover:text-sky-300;
+  @apply text-accent transition hover:text-accent-hover;
 }
 
 .panel {
-  @apply rounded-xl border border-slate-700 bg-slate-900/70 p-5 shadow-xl shadow-black/30;
+  @apply rounded-xl border border-neutral-800 bg-surface/70 p-5 shadow-xl shadow-black/30;
 }
 
 .input {
-  @apply w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent;
+  @apply w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent;
 }
 
 .button-primary {
-  @apply inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60;
+  @apply inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 .button-secondary {
-  @apply inline-flex items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-slate-500;
+  @apply inline-flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-neutral-500;
 }
