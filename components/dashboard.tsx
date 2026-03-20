@@ -5,28 +5,12 @@ import Image from "next/image";
 
 import type { Athlete, DashboardBootstrap, Job, Template } from "@/lib/types";
 import { SettingsPanel } from "@/components/settings-panel";
+import { JobQueues } from "@/components/job-queues";
 
 interface DashboardProps {
   accessToken: string;
   onSignOut: () => Promise<unknown>;
 }
-
-const statusClassMap: Record<string, string> = {
-  queued: "bg-slate-700 text-slate-200",
-  generating: "bg-blue-900 text-blue-200",
-  scoring: "bg-amber-900 text-amber-200",
-  needs_review: "bg-purple-900 text-purple-200",
-  approved: "bg-emerald-900 text-emerald-200",
-  rejected: "bg-rose-900 text-rose-200"
-};
-
-const formatDate = (dateString: string) =>
-  new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(dateString));
 
 export const Dashboard = ({ accessToken }: DashboardProps) => {
   const [data, setData] = useState<DashboardBootstrap | null>(null);
@@ -39,6 +23,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAthleteForm, setShowAthleteForm] = useState(false);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   const fetchBootstrap = useCallback(async () => {
     setLoading(true);
@@ -71,8 +56,10 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
   const activeAthlete = data?.athletes.find((a) => a.id === selectedAthlete) ?? null;
   const consentMissing = activeAthlete !== null && !activeAthlete.consent_signed;
 
-  const runGeneration = async () => {
-    if (!selectedAthlete || !selectedTemplate) {
+  const runGeneration = async (athleteId?: string, templateId?: string) => {
+    const aId = athleteId ?? selectedAthlete;
+    const tId = templateId ?? selectedTemplate;
+    if (!aId || !tId) {
       setError("Select both athlete and template.");
       return;
     }
@@ -88,10 +75,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`
         },
-        body: JSON.stringify({
-          athleteId: selectedAthlete,
-          templateId: selectedTemplate
-        })
+        body: JSON.stringify({ athleteId: aId, templateId: tId })
       });
 
       const payload = (await response.json()) as { data?: Job; error?: string };
@@ -101,10 +85,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
 
       setData((current) =>
         current
-          ? {
-              ...current,
-              jobs: [payload.data as Job, ...current.jobs]
-            }
+          ? { ...current, jobs: [payload.data as Job, ...current.jobs] }
           : current
       );
       setNotice(`Generation completed: ${payload.data.status}.`);
@@ -115,11 +96,45 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
     }
   };
 
+  const handleJobUpdate = (updatedJob: Job) => {
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            jobs: current.jobs.map((j) => (j.id === updatedJob.id ? updatedJob : j))
+          }
+        : current
+    );
+  };
+
+  const handleJobsCreated = (newJobs: Job[]) => {
+    setData((current) =>
+      current
+        ? { ...current, jobs: [...newJobs, ...current.jobs] }
+        : current
+    );
+  };
+
+  const seedTemplates = async () => {
+    setSeeding(true);
+    try {
+      const response = await fetch("/api/templates/seed", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (response.ok) {
+        await fetchBootstrap();
+        setNotice("45 default templates seeded successfully.");
+      }
+    } finally {
+      setSeeding(false);
+    }
+  };
+
   const createAthlete = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setNotice(null);
-
     const formData = new FormData(event.currentTarget);
     try {
       const response = await fetch("/api/athletes", {
@@ -131,13 +146,9 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
       if (!response.ok || !payload.data) {
         throw new Error(payload.error ?? "Unable to create athlete.");
       }
-
       setData((current) =>
         current
-          ? {
-              ...current,
-              athletes: [payload.data as Athlete, ...current.athletes]
-            }
+          ? { ...current, athletes: [payload.data as Athlete, ...current.athletes] }
           : current
       );
       setSelectedAthlete(payload.data.id);
@@ -153,7 +164,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
     setError(null);
     setNotice(null);
     const formData = new FormData(event.currentTarget);
-
     try {
       const response = await fetch("/api/templates", {
         method: "POST",
@@ -174,18 +184,13 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           platforms: formData.get("platforms")
         })
       });
-
       const payload = (await response.json()) as { data?: Template; error?: string };
       if (!response.ok || !payload.data) {
         throw new Error(payload.error ?? "Unable to create template.");
       }
-
       setData((current) =>
         current
-          ? {
-              ...current,
-              templates: [payload.data as Template, ...current.templates]
-            }
+          ? { ...current, templates: [payload.data as Template, ...current.templates] }
           : current
       );
       setSelectedTemplate(payload.data.id);
@@ -195,6 +200,20 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
       setError(requestError instanceof Error ? requestError.message : "Template creation failed.");
     }
   };
+
+  // Group templates by category for dropdown
+  const groupedTemplates: Array<{ category: string; items: Template[] }> = [];
+  if (data) {
+    const map = new Map<string, Template[]>();
+    for (const t of data.templates) {
+      const arr = map.get(t.category) ?? [];
+      arr.push(t);
+      map.set(t.category, arr);
+    }
+    for (const [category, items] of map) {
+      groupedTemplates.push({ category, items });
+    }
+  }
 
   if (loading) {
     return (
@@ -240,12 +259,8 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
         </button>
       </header>
 
-      {/* Settings Panel */}
       {showSettings && (
-        <SettingsPanel
-          accessToken={accessToken}
-          onClose={() => setShowSettings(false)}
-        />
+        <SettingsPanel accessToken={accessToken} onClose={() => setShowSettings(false)} />
       )}
 
       {/* Stats Row */}
@@ -268,7 +283,22 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
         </div>
       </div>
 
-      {/* Generation + Jobs */}
+      {/* Seed Templates prompt */}
+      {data.templates.length === 0 && (
+        <div className="panel flex flex-col items-center gap-3 py-8 text-center">
+          <p className="text-sm text-slate-300">No templates found. Seed the default 45 V5 templates to get started.</p>
+          <button
+            className="button-primary px-8 py-3"
+            onClick={seedTemplates}
+            disabled={seeding}
+            type="button"
+          >
+            {seeding ? "Seeding…" : "Seed Default Templates (15 × 3)"}
+          </button>
+        </div>
+      )}
+
+      {/* Generation + Queue */}
       <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
         <div className="panel space-y-5 border-l-4 border-l-accent">
           <div>
@@ -305,10 +335,14 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
                 onChange={(event) => setSelectedTemplate(event.target.value)}
               >
                 <option value="">Select template</option>
-                {data.templates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.category} · {template.variant_name}
-                  </option>
+                {groupedTemplates.map((group) => (
+                  <optgroup key={group.category} label={`— ${group.category} —`}>
+                    {group.items.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.category} – {template.variant_name} ({template.content_tier})
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </div>
@@ -317,7 +351,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           <button
             className="button-primary w-full py-3 text-base"
             disabled={isGenerating || consentMissing}
-            onClick={runGeneration}
+            onClick={() => runGeneration()}
           >
             {isGenerating ? "Generating..." : "Generate Finished Video"}
           </button>
@@ -338,32 +372,15 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           {notice ? <p className="text-sm text-emerald-400">{notice}</p> : null}
         </div>
 
-        <div className="panel space-y-4">
-          <h2 className="text-lg font-semibold">Recent Jobs</h2>
-          <div className="max-h-[420px] space-y-3 overflow-auto pr-1">
-            {data.jobs.map((job) => (
-              <article key={job.id} className="rounded-lg border border-slate-700 bg-slate-950 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-100">
-                      {job.athlete?.name ?? "Unknown athlete"} · {job.template?.variant_name ?? "Template"}
-                    </p>
-                    <p className="mt-1 text-xs text-muted">{formatDate(job.created_at)}</p>
-                  </div>
-                  <span className={`rounded-full px-2 py-1 text-xs ${statusClassMap[job.status] ?? "bg-slate-700"}`}>
-                    {job.status}
-                  </span>
-                </div>
-                <p className="mt-2 text-xs text-muted">Engine: {job.engine_used ?? "n/a"}</p>
-                <p className="text-xs text-muted">Face score: {job.face_score?.toFixed(1) ?? "n/a"}</p>
-                {job.video_url ? (
-                  <video className="mt-3 w-full rounded-md border border-slate-700" controls src={job.video_url} />
-                ) : null}
-              </article>
-            ))}
-            {data.jobs.length === 0 ? <p className="text-sm text-muted">No jobs yet.</p> : null}
-          </div>
-        </div>
+        {/* Tabbed Queue View */}
+        <JobQueues
+          jobs={data.jobs}
+          settings={data.settings}
+          accessToken={accessToken}
+          onJobUpdate={handleJobUpdate}
+          onJobsCreated={handleJobsCreated}
+          onRegenerate={(athleteId, templateId) => void runGeneration(athleteId, templateId)}
+        />
       </section>
 
       {/* Collapsible Forms */}
@@ -383,26 +400,17 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
               <input className="input" name="position" placeholder="Position" />
               <input className="input" name="class_year" placeholder="Class Year" />
               <input className="input" name="state" placeholder="State" />
-              <textarea
-                className="input min-h-24"
-                name="descriptor"
-                placeholder="Physical descriptor for prompt assembly"
-                required
-              />
+              <textarea className="input min-h-24" name="descriptor" placeholder="Physical descriptor for prompt assembly" required />
               <input className="input" name="style_preference" placeholder="Style preference (e.g. streetwear)" />
               <label className="flex items-center gap-2 text-sm text-slate-200">
                 <input className="h-4 w-4" name="consent_signed" type="checkbox" value="true" />
                 Signed consent &amp; usage release on file
               </label>
               <div className="space-y-1">
-                <label className="text-xs text-muted" htmlFor="reference-photo">
-                  Reference Photo
-                </label>
+                <label className="text-xs text-muted" htmlFor="reference-photo">Reference Photo</label>
                 <input id="reference-photo" className="input p-2" name="reference_photo" type="file" accept="image/*" />
               </div>
-              <button className="button-secondary w-full" type="submit">
-                Save Athlete
-              </button>
+              <button className="button-secondary w-full" type="submit">Save Athlete</button>
             </form>
           )}
         </div>
@@ -432,9 +440,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
                 <option value="social">social</option>
               </select>
               <input className="input" name="platforms" placeholder="Platforms (e.g. TikTok, Reels, YT)" />
-              <button className="button-secondary w-full" type="submit">
-                Save Template
-              </button>
+              <button className="button-secondary w-full" type="submit">Save Template</button>
             </form>
           )}
         </div>

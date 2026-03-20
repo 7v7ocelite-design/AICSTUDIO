@@ -80,6 +80,26 @@ export async function POST(request: NextRequest) {
     const workflow = parseWorkflowSettings(settingsMap);
     const assembledPrompt = buildVideoPrompt(athlete as Athlete, template as Template);
 
+    // Determine version number based on existing jobs for this athlete+template combo
+    const { count: existingCount } = await supabase
+      .from("jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("athlete_id", payload.athleteId)
+      .eq("template_id", payload.templateId);
+    const version = (existingCount ?? 0) + 1;
+
+    const outputFilename = buildOutputFileName(
+      athlete.name,
+      template.category,
+      template.location,
+      version
+    );
+
+    // FUTURE API INTEGRATION POINT:
+    // When video engine APIs are connected, use `outputFilename` as the
+    // storage object name when uploading to Supabase Storage or Google Drive.
+    // Example: await supabase.storage.from('videos').upload(outputFilename, videoBuffer);
+
     const { data: createdJob, error: createJobError } = await supabase
       .from("jobs")
       .insert({
@@ -87,6 +107,7 @@ export async function POST(request: NextRequest) {
         template_id: template.id,
         status: "queued",
         assembled_prompt: assembledPrompt,
+        output_filename: outputFilename,
         retry_count: 0
       })
       .select("*")
@@ -116,11 +137,13 @@ export async function POST(request: NextRequest) {
         .eq("id", createdJob.id);
 
       const n8nResult = await callN8nWebhook(workflow.n8nWebhookUrl, {
+        event: "job_created",
         job_id: createdJob.id,
         attempt,
         athlete,
         template,
         prompt: assembledPrompt,
+        output_filename: outputFilename,
         preferred_engine: engine
       });
 
@@ -140,7 +163,7 @@ export async function POST(request: NextRequest) {
               }
             );
 
-      const fileName = buildOutputFileName(athlete.name, template.variant_name, attempt);
+      const fileName = outputFilename;
       const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, fileName);
 
       await supabase.from("jobs").update({ status: "scoring" }).eq("id", createdJob.id);
@@ -193,7 +216,7 @@ export async function POST(request: NextRequest) {
 
     const { data: finalJob, error: finalJobError } = await supabase
       .from("jobs")
-      .select("*, athlete:athletes(name), template:templates(variant_name, category)")
+      .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
       .eq("id", createdJob.id)
       .single();
 

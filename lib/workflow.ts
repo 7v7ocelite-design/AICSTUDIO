@@ -42,19 +42,21 @@ export const parseWorkflowSettings = (input: Record<string, string>): WorkflowSe
 
 export const buildOutputFileName = (
   athleteName: string,
-  templateVariant: string,
-  attempt: number,
+  category: string,
+  location: string,
+  version: number,
   date = new Date()
 ): string => {
-  const scrub = (value: string) =>
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40);
-
-  const stamp = date.toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
-  return `aic-${scrub(athleteName)}-${scrub(templateVariant)}-a${attempt + 1}-${stamp}.mp4`;
+  const name = athleteName.replace(/[^a-zA-Z]/g, "");
+  const cat = category.replace(/\s+/g, "");
+  const loc = location
+    .replace(/[^a-zA-Z0-9\s]/g, "")
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join("");
+  const ver = `V${String(version).padStart(2, "0")}`;
+  const dateStr = date.toISOString().split("T")[0];
+  return `${name}_${cat}_${loc}_${ver}_${dateStr}.mp4`;
 };
 
 const deterministicScore = (seed: string): number => {
@@ -153,5 +155,35 @@ export const callN8nWebhook = async (
     };
   } catch {
     return null;
+  }
+};
+
+export const callDeliveryWebhook = async (
+  webhookUrl: string,
+  job: Record<string, unknown>
+): Promise<void> => {
+  if (!webhookUrl) return;
+
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "job_approved",
+        job_id: job.id,
+        athlete_id: job.athlete_id,
+        template_id: job.template_id,
+        video_url: job.video_url,
+        output_filename: job.output_filename,
+        engine_used: job.engine_used,
+        face_score: job.face_score,
+        approved_at: new Date().toISOString()
+        // n8n will use this to:
+        // 1. Upload to Google Drive (Athletes/{name}/Output/{date}/)
+        // 2. Trigger Metricool social scheduling
+      })
+    });
+  } catch {
+    // Silently skip — webhook delivery is best-effort
   }
 };
