@@ -32,3 +32,5 @@ The app requires Supabase for auth, database, and storage. For local development
 - **Email confirmations**: Local Supabase has `enable_confirmations = false` in `supabase/config.toml`, so sign-up works immediately without email verification.
 - **AI API keys are optional**: All external AI APIs (Kling, Runway, Vidu, Anthropic) gracefully fall back to placeholder/deterministic values when keys are not configured. The app is fully functional as a UI/pipeline demo without any real API keys.
 - **Dev server restart required after `.env.local` changes**: `NEXT_PUBLIC_*` vars are bundled at compile time, so the dev server must be restarted after modifying `.env.local`.
+- **`settings` table schema**: The `settings` table has only `id`, `key`, and `value` columns (no `created_at`). When upserting, only include `key` and `value` — supplying extra columns causes a Supabase schema-cache error.
+- **`postgresql-client` needed for schema apply**: The cloud VM does not ship with `psql`; install it via `sudo apt-get install -y postgresql-client` before running `psql -f supabase/schema.sql`.
