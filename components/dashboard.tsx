@@ -66,6 +66,9 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
     void fetchBootstrap();
   }, [fetchBootstrap]);
 
+  const activeAthlete = data?.athletes.find((a) => a.id === selectedAthlete) ?? null;
+  const consentMissing = activeAthlete !== null && !activeAthlete.consent_signed;
+
   const runGeneration = async () => {
     if (!selectedAthlete || !selectedTemplate) {
       setError("Select both athlete and template.");
@@ -263,7 +266,7 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
                 <option value="">Select athlete</option>
                 {data.athletes.map((athlete) => (
                   <option key={athlete.id} value={athlete.id}>
-                    {athlete.name}
+                    {athlete.consent_signed ? "✓" : "✗"} {athlete.name}
                   </option>
                 ))}
               </select>
@@ -288,9 +291,19 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
             </div>
           </div>
 
-          <button className="button-primary w-full py-3 text-base" disabled={isGenerating} onClick={runGeneration}>
+          <button
+            className="button-primary w-full py-3 text-base"
+            disabled={isGenerating || consentMissing}
+            onClick={runGeneration}
+          >
             {isGenerating ? "Generating..." : "Generate Finished Video"}
           </button>
+
+          {consentMissing && (
+            <p className="rounded-lg border border-amber-700 bg-amber-950/60 px-3 py-2 text-sm text-amber-300">
+              ⚠ Consent release not signed. Upload signed release before generating content.
+            </p>
+          )}
 
           <div className="rounded-lg border border-slate-700 bg-slate-950/70 p-3 text-xs text-muted">
             <p>Auto-approve threshold: {data.settings.auto_approve_threshold ?? "90"}</p>
@@ -346,7 +359,7 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
           <input className="input" name="style_preference" placeholder="Style preference (e.g. streetwear)" />
           <label className="flex items-center gap-2 text-sm text-slate-200">
             <input className="h-4 w-4" name="consent_signed" type="checkbox" value="true" />
-            Consent signed
+            Signed consent &amp; usage release on file
           </label>
           <div className="space-y-1">
             <label className="text-xs text-muted" htmlFor="reference-photo">

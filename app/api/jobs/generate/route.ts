@@ -60,6 +60,12 @@ export async function POST(request: NextRequest) {
     if (athleteError || !athlete) {
       return NextResponse.json({ error: athleteError?.message ?? "Athlete not found." }, { status: 404 });
     }
+    if (!athlete.consent_signed) {
+      return NextResponse.json(
+        { error: "Cannot generate content — athlete has not signed a consent and usage release. Update the athlete record after obtaining signed consent." },
+        { status: 403 }
+      );
+    }
     if (templateError || !template) {
       return NextResponse.json({ error: templateError?.message ?? "Template not found." }, { status: 404 });
     }
