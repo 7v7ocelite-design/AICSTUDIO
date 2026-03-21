@@ -165,12 +165,10 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
       setSelectedAthlete(payload.data.id);
       const photoNote = hasPhoto ? " Reference photo uploaded." : "";
       setTimedNotice(`Athlete profile created.${photoNote}`);
-      if (athleteFormRef.current) {
-        athleteFormRef.current.reset();
-      }
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      try {
+        athleteFormRef.current?.reset();
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } catch { /* ignore reset failures on unmounted forms */ }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Athlete creation failed.");
     }
@@ -212,9 +210,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
       );
       setSelectedTemplate(payload.data.id);
       setTimedNotice("Template created.");
-      if (templateFormRef.current) {
-        templateFormRef.current.reset();
-      }
+      try { templateFormRef.current?.reset(); } catch { /* ignore */ }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Template creation failed.");
     }
