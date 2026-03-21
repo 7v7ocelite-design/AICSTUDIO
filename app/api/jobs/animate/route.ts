@@ -6,6 +6,8 @@ import { buildOutputFileName, parseWorkflowSettings } from "@/lib/workflow";
 import { createJob, updateJob, fetchJob } from "@/lib/jobs-rpc";
 import type { Job } from "@/lib/types";
 
+export const maxDuration = 300;
+
 interface AnimateBody {
   athleteId: string;
   animationStyle: string;

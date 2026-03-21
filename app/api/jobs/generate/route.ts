@@ -14,6 +14,8 @@ import {
 import { createJob, updateJob, fetchJob } from "@/lib/jobs-rpc";
 import { optimizePrompt, scoreVideo } from "@/lib/claude";
 
+export const maxDuration = 300;
+
 interface GenerateBody {
   athleteId: string;
   templateId?: string;

@@ -4,6 +4,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { mapApiError, readJsonBody, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 
+export const maxDuration = 60;
+
 interface ChatBody {
   message: string;
   athleteId: string | null;
