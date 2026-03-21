@@ -8,6 +8,9 @@ import { ToastProvider, useToast } from "@/components/toast";
 import { Sidebar, type ViewId } from "@/components/sidebar";
 import { ApiMonitor } from "@/components/api-monitor";
 import { GenerateView } from "@/components/generate-view";
+import { ChatAssistant } from "@/components/chat-assistant";
+import { TextToVideo } from "@/components/text-to-video";
+import { AnimatePhoto } from "@/components/animate-photo";
 import { AthletesView } from "@/components/athletes-view";
 import { TemplatesView } from "@/components/templates-view";
 import { AnalyticsView } from "@/components/analytics-view";
@@ -107,6 +110,31 @@ const StudioInner = () => {
             athletes={data.athletes}
             templates={data.templates}
             jobs={data.jobs}
+            accessToken={ACCESS_TOKEN}
+            onJobCreated={handleJobCreated}
+          />
+        );
+      case "chat":
+        return (
+          <ChatAssistant
+            athletes={data.athletes}
+            templates={data.templates}
+            accessToken={ACCESS_TOKEN}
+            onJobCreated={handleJobCreated}
+          />
+        );
+      case "text-to-video":
+        return (
+          <TextToVideo
+            athletes={data.athletes}
+            accessToken={ACCESS_TOKEN}
+            onJobCreated={handleJobCreated}
+          />
+        );
+      case "animate-photo":
+        return (
+          <AnimatePhoto
+            athletes={data.athletes}
             accessToken={ACCESS_TOKEN}
             onJobCreated={handleJobCreated}
           />

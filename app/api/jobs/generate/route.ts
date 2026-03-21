@@ -15,7 +15,10 @@ import { createJob, updateJob, fetchJob } from "@/lib/jobs-rpc";
 
 interface GenerateBody {
   athleteId: string;
-  templateId: string;
+  templateId?: string;
+  custom_prompt?: string;
+  duration?: number;
+  ratio?: string;
 }
 
 const uploadGeneratedVideo = async (sourceUrl: string, fileName: string): Promise<string> => {
@@ -46,15 +49,18 @@ export async function POST(request: NextRequest) {
   try {
     await requireAuthenticatedOperator(request);
     const payload = await readJsonBody<GenerateBody>(request);
-    if (!payload.athleteId || !payload.templateId) {
-      return NextResponse.json({ error: "athleteId and templateId are required." }, { status: 400 });
+    if (!payload.athleteId) {
+      return NextResponse.json({ error: "athleteId is required." }, { status: 400 });
+    }
+    if (!payload.templateId && !payload.custom_prompt) {
+      return NextResponse.json({ error: "templateId or custom_prompt is required." }, { status: 400 });
     }
 
     const supabase = getAdminSupabase();
-    const [{ data: athlete, error: athleteError }, { data: template, error: templateError }, { data: settingsRows, error: settingsError }] =
+
+    const [{ data: athlete, error: athleteError }, { data: settingsRows, error: settingsError }] =
       await Promise.all([
         supabase.from("athletes").select("*").eq("id", payload.athleteId).single(),
-        supabase.from("templates").select("*").eq("id", payload.templateId).single(),
         supabase.from("settings").select("key, value")
       ]);
 
@@ -63,15 +69,25 @@ export async function POST(request: NextRequest) {
     }
     if (!athlete.consent_signed) {
       return NextResponse.json(
-        { error: "Cannot generate content — athlete has not signed a consent and usage release. Update the athlete record after obtaining signed consent." },
+        { error: "Cannot generate content — athlete has not signed a consent and usage release." },
         { status: 403 }
       );
     }
-    if (templateError || !template) {
-      return NextResponse.json({ error: templateError?.message ?? "Template not found." }, { status: 404 });
-    }
     if (settingsError) {
       throw new Error(settingsError.message);
+    }
+
+    let template: Record<string, unknown> | null = null;
+    if (payload.templateId) {
+      const { data: t, error: tErr } = await supabase
+        .from("templates")
+        .select("*")
+        .eq("id", payload.templateId)
+        .single();
+      if (tErr || !t) {
+        return NextResponse.json({ error: "Template not found." }, { status: 404 });
+      }
+      template = t;
     }
 
     const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((acc, row) => {
@@ -79,31 +95,34 @@ export async function POST(request: NextRequest) {
       return acc;
     }, {});
     const workflow = parseWorkflowSettings(settingsMap);
-    const assembledPrompt = buildVideoPrompt(athlete as Athlete, template as Template);
 
-    console.log("[GENERATE] Athlete:", athlete.name, "| Descriptor:", athlete.descriptor?.slice(0, 60));
-    console.log("[GENERATE] Template:", template.category, template.variant_name, "| Tier:", template.content_tier);
+    const assembledPrompt = payload.custom_prompt
+      ? payload.custom_prompt
+      : template
+        ? buildVideoPrompt(athlete as Athlete, template as unknown as Template)
+        : `${athlete.descriptor}. Cinematic quality, photorealistic, 4K.`;
+
+    const category = (template?.category as string) ?? "Custom";
+    const location = (template?.location as string) ?? "Studio";
+
+    console.log("[GENERATE] Athlete:", athlete.name, "| Mode:", template ? "template" : "custom");
     console.log("[GENERATE] Prompt:", assembledPrompt.slice(0, 200));
     console.log("[GENERATE] Runway key:", workflow.runwayApiKey ? "SET" : "NOT SET");
 
+    const templateIdForCount = payload.templateId ?? athlete.id;
     const { count: existingCount } = await supabase
       .from("jobs")
       .select("id", { count: "exact", head: true })
       .eq("athlete_id", payload.athleteId)
-      .eq("template_id", payload.templateId);
+      .eq("template_id", templateIdForCount);
     const version = (existingCount ?? 0) + 1;
 
-    const outputFilename = buildOutputFileName(
-      athlete.name,
-      template.category,
-      template.location,
-      version
-    );
+    const outputFilename = buildOutputFileName(athlete.name, category, location, version);
 
     // Create job via RPC (bypasses PostgREST schema cache)
     const { id: jobId } = await createJob(supabase, {
       athlete_id: athlete.id,
-      template_id: template.id,
+      template_id: (template?.id as string) ?? athlete.id,
       status: "queued",
       assembled_prompt: assembledPrompt,
       output_filename: outputFilename,
@@ -117,7 +136,8 @@ export async function POST(request: NextRequest) {
     let finalFileName: string | null = null;
 
     for (let attempt = 0; attempt <= workflow.maxRetries; attempt += 1) {
-      const engine = pickEngineForTier(template.content_tier, attempt);
+      const tier = (template?.content_tier as "standard" | "premium" | "social") ?? "premium";
+      const engine = pickEngineForTier(tier, attempt);
       finalEngine = engine;
 
       await updateJob(supabase, jobId, {
@@ -166,7 +186,7 @@ export async function POST(request: NextRequest) {
         (await scoreFaceMatch({
           athleteName: athlete.name,
           descriptor: athlete.descriptor,
-          templateVariant: template.variant_name,
+          templateVariant: (template?.variant_name as string) ?? "custom",
           prompt: assembledPrompt,
           anthropicApiKey: workflow.anthropicApiKey
         }));

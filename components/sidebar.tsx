@@ -4,13 +4,17 @@ import Image from "next/image";
 import {
   Clapperboard, UserPlus, FilePlus, Users, Film,
   ClipboardList, CheckCircle2, AlertTriangle,
-  BarChart3, Settings, PanelLeftClose, PanelLeftOpen
+  BarChart3, Settings, PanelLeftClose, PanelLeftOpen,
+  MessageSquare, Type, ImageIcon, Music, Wand2
 } from "lucide-react";
 
 import type { Job } from "@/lib/types";
 
 export type ViewId =
   | "generate"
+  | "chat"
+  | "text-to-video"
+  | "animate-photo"
   | "athletes"
   | "templates"
   | "all-jobs"
@@ -121,8 +125,20 @@ export const Sidebar = ({
       <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3">
         {!collapsed && <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Quick Actions</p>}
         {navItem("generate", <Clapperboard className="h-4 w-4" />, "New Production")}
+        {navItem("chat", <MessageSquare className="h-4 w-4" />, "AI Assistant")}
         {actionItem(<UserPlus className="h-4 w-4" />, "Add Athlete", onAddAthlete)}
-        {actionItem(<FilePlus className="h-4 w-4" />, "Add Template", onAddTemplate)}
+
+        <div className="my-2 border-t border-[var(--border-subtle)]" />
+        {!collapsed && <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Creative Tools</p>}
+        {navItem("text-to-video", <Type className="h-4 w-4" />, "Text-to-Video")}
+        {navItem("animate-photo", <ImageIcon className="h-4 w-4" />, "Animate Photo")}
+        {!collapsed && (
+          <div className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted opacity-50 cursor-default">
+            <Music className="h-4 w-4 flex-shrink-0" />
+            <span className="truncate">Audio</span>
+            <span className="ml-auto text-[9px] bg-blue-accent/20 text-blue-accent rounded px-1.5 py-0.5">Soon</span>
+          </div>
+        )}
 
         <div className="my-2 border-t border-[var(--border-subtle)]" />
         {!collapsed && <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Library</p>}
