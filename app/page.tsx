@@ -1,14 +1,7 @@
 "use client";
 
-import { Dashboard } from "@/components/dashboard";
+import { AICStudioLayout } from "@/components/AICStudioLayout";
 
 export default function HomePage() {
-  return (
-    <Dashboard
-      accessToken="no-auth"
-      onSignOut={async () => {
-        window.location.reload();
-      }}
-    />
-  );
+  return <AICStudioLayout />;
 }

@@ -4,10 +4,25 @@
 
 :root {
   color-scheme: dark;
+  --aic-red: #CC0000;
+  --aic-red-hover: #E31B23;
+  --bg-darkest: #111111;
+  --bg-sidebar: #0D0D0D;
+  --bg-panel: #1A1A1A;
+  --bg-card: #222222;
+  --bg-card-hover: #2A2A2A;
+  --border-subtle: rgba(255,255,255,0.08);
+  --border-active: rgba(255,255,255,0.15);
+  --text-primary: #F5F5F5;
+  --text-secondary: #999999;
+  --text-muted: #666666;
+  --accent-green: #22C55E;
+  --accent-amber: #F59E0B;
+  --accent-blue: #3B82F6;
 }
 
 body {
-  @apply min-h-screen bg-background text-text antialiased;
+  @apply min-h-screen bg-[var(--bg-darkest)] text-[var(--text-primary)] antialiased;
 }
 
 a {
@@ -15,7 +30,7 @@ a {
 }
 
 .panel {
-  @apply rounded-xl border border-neutral-800 bg-surface/70 p-5 shadow-xl shadow-black/30;
+  @apply rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-panel)] p-5 shadow-xl shadow-black/30;
 }
 
 .input {
@@ -29,3 +44,16 @@ a {
 .button-secondary {
   @apply inline-flex items-center justify-center rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-neutral-500;
 }
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-slide-in { animation: slideIn 200ms ease-out; }
+.animate-fade-in { animation: fadeIn 200ms ease-out; }

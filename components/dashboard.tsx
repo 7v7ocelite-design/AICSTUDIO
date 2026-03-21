@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 
 import type { Athlete, DashboardBootstrap, Job, Template } from "@/lib/types";
@@ -23,7 +23,14 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAthleteForm, setShowAthleteForm] = useState(false);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
-  const [seeding, setSeeding] = useState(false);
+  const athleteFormRef = useRef<HTMLFormElement>(null);
+  const templateFormRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const setTimedNotice = (message: string) => {
+    setNotice(message);
+    setTimeout(() => setNotice(null), 5000);
+  };
 
   const fetchBootstrap = useCallback(async () => {
     setLoading(true);
@@ -88,7 +95,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           ? { ...current, jobs: [payload.data as Job, ...current.jobs] }
           : current
       );
-      setNotice(`Generation completed: ${payload.data.status}.`);
+      setTimedNotice(`Generation completed: ${payload.data.status}.`);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Generation failed.");
     } finally {
@@ -115,27 +122,14 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
     );
   };
 
-  const seedTemplates = async () => {
-    setSeeding(true);
-    try {
-      const response = await fetch("/api/templates/seed", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      if (response.ok) {
-        await fetchBootstrap();
-        setNotice("45 default templates seeded successfully.");
-      }
-    } finally {
-      setSeeding(false);
-    }
-  };
-
   const createAthlete = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setNotice(null);
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const hasPhoto = formData.get("reference_photo") instanceof File &&
+      (formData.get("reference_photo") as File).size > 0;
     try {
       const response = await fetch("/api/athletes", {
         method: "POST",
@@ -152,8 +146,12 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           : current
       );
       setSelectedAthlete(payload.data.id);
-      setNotice("Athlete profile created.");
-      event.currentTarget.reset();
+      const photoNote = hasPhoto ? " Reference photo uploaded." : "";
+      setTimedNotice(`Athlete profile created.${photoNote}`);
+      try {
+        athleteFormRef.current?.reset();
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } catch { /* ignore reset failures on unmounted forms */ }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Athlete creation failed.");
     }
@@ -194,8 +192,8 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           : current
       );
       setSelectedTemplate(payload.data.id);
-      setNotice("Template created.");
-      event.currentTarget.reset();
+      setTimedNotice("Template created.");
+      try { templateFormRef.current?.reset(); } catch { /* ignore */ }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Template creation failed.");
     }
@@ -282,21 +280,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           <p className="text-xs text-slate-400 mt-1">Needs Review</p>
         </div>
       </div>
-
-      {/* Seed Templates prompt */}
-      {data.templates.length === 0 && (
-        <div className="panel flex flex-col items-center gap-3 py-8 text-center">
-          <p className="text-sm text-slate-300">No templates found. Seed the default 45 V5 templates to get started.</p>
-          <button
-            className="button-primary px-8 py-3"
-            onClick={seedTemplates}
-            disabled={seeding}
-            type="button"
-          >
-            {seeding ? "Seeding…" : "Seed Default Templates (15 × 3)"}
-          </button>
-        </div>
-      )}
 
       {/* Generation + Queue */}
       <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
@@ -395,7 +378,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
             <span className="text-slate-400 text-sm">{showAthleteForm ? "▲" : "▼"}</span>
           </button>
           {showAthleteForm && (
-            <form className="mt-4 space-y-4" onSubmit={createAthlete}>
+            <form ref={athleteFormRef} className="mt-4 space-y-4" onSubmit={createAthlete}>
               <input className="input" name="name" placeholder="Name" required />
               <input className="input" name="position" placeholder="Position" />
               <input className="input" name="class_year" placeholder="Class Year" />
@@ -408,7 +391,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
               </label>
               <div className="space-y-1">
                 <label className="text-xs text-muted" htmlFor="reference-photo">Reference Photo</label>
-                <input id="reference-photo" className="input p-2" name="reference_photo" type="file" accept="image/*" />
+                <input ref={fileInputRef} id="reference-photo" className="input p-2" name="reference_photo" type="file" accept="image/*" />
               </div>
               <button className="button-secondary w-full" type="submit">Save Athlete</button>
             </form>
@@ -425,7 +408,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
             <span className="text-slate-400 text-sm">{showTemplateForm ? "▲" : "▼"}</span>
           </button>
           {showTemplateForm && (
-            <form className="mt-4 space-y-4" onSubmit={createTemplate}>
+            <form ref={templateFormRef} className="mt-4 space-y-4" onSubmit={createTemplate}>
               <input className="input" name="category" placeholder="Category" required />
               <input className="input" name="variant_name" placeholder="Variant name" required />
               <textarea className="input min-h-20" name="action" placeholder="Action" required />

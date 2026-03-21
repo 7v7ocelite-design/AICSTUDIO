@@ -26,7 +26,8 @@ create table if not exists templates (
   audio_track text,
   content_tier text not null check (content_tier in ('standard', 'premium', 'social')),
   platforms text,
-  created_at timestamp with time zone default now()
+  created_at timestamp with time zone default now(),
+  unique (category, variant_name)
 );
 
 create table if not exists jobs (

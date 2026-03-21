@@ -5,13 +5,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#0A0A0A",
-        surface: "#1A1A1A",
-        card: "#242424",
-        accent: "#E31B23",
-        "accent-hover": "#FF2D35",
-        text: "#f3f4f6",
-        muted: "#9ca3af"
+        background: "var(--bg-darkest)",
+        surface: "var(--bg-panel)",
+        card: "var(--bg-card)",
+        "card-hover": "var(--bg-card-hover)",
+        sidebar: "var(--bg-sidebar)",
+        accent: "var(--aic-red)",
+        "accent-hover": "var(--aic-red-hover)",
+        text: "var(--text-primary)",
+        muted: "var(--text-muted)",
+        secondary: "var(--text-secondary)",
+        "green-accent": "var(--accent-green)",
+        "amber-accent": "var(--accent-amber)",
+        "blue-accent": "var(--accent-blue)"
       }
     }
   },
