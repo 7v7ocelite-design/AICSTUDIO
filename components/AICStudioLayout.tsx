@@ -220,6 +220,7 @@ const StudioInner = () => {
         <ApiMonitor
           settings={data.settings}
           jobs={data.jobs}
+          accessToken={ACCESS_TOKEN}
           onClose={() => setRightPanelOpen(false)}
         />
       )}
