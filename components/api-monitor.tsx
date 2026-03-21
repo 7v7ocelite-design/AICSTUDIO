@@ -11,11 +11,11 @@ interface ApiMonitorProps {
 }
 
 const SERVICE_MAP = [
-  { key: "kling_api_key", label: "Kling AI", tier: "Standard 80%", role: "Video engine" },
-  { key: "runway_api_key", label: "Runway Gen-4.5", tier: "Premium 10%", role: "Video engine" },
-  { key: "vidu_api_key", label: "Vidu Q3 Pro", tier: "Social 10%", role: "Video engine" },
-  { key: "anthropic_api_key", label: "Claude AI", tier: null, role: "QC scoring" },
-  { key: "n8n_webhook_url", label: "n8n Webhook", tier: null, role: "Delivery" }
+  { key: "runway_api_key", label: "Runway Gen-4.5", tier: "All tiers", role: "Video engine (primary)", comingSoon: false },
+  { key: "kling_api_key", label: "Kling AI", tier: "Standard", role: "Video engine", comingSoon: true },
+  { key: "vidu_api_key", label: "Vidu Q3 Pro", tier: "Social", role: "Video engine", comingSoon: true },
+  { key: "anthropic_api_key", label: "Claude AI", tier: null, role: "QC scoring", comingSoon: false },
+  { key: "n8n_webhook_url", label: "n8n Webhook", tier: null, role: "Delivery", comingSoon: false }
 ];
 
 const formatTime = (dateString: string) =>
@@ -38,18 +38,23 @@ export const ApiMonitor = ({ settings, jobs, onClose }: ApiMonitorProps) => {
         <div className="space-y-1 px-4 py-3">
           {SERVICE_MAP.map((svc) => {
             const connected = Boolean(settings[svc.key]);
+            const dotColor = svc.comingSoon ? "bg-blue-accent" : connected ? "bg-green-accent" : "bg-neutral-600";
             return (
               <div key={svc.key} className="flex items-center gap-3 rounded-lg px-2 py-2">
-                <span className={`h-2 w-2 flex-shrink-0 rounded-full ${connected ? "bg-green-accent" : "bg-neutral-600"}`} />
+                <span className={`h-2 w-2 flex-shrink-0 rounded-full ${dotColor}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-[var(--text-primary)]">{svc.label}</p>
                   <p className="text-[10px] text-muted">{svc.role}</p>
                 </div>
                 <div className="text-right">
                   {svc.tier && <p className="text-[10px] text-secondary">{svc.tier}</p>}
-                  <p className={`text-[10px] ${connected ? "text-green-accent" : "text-muted"}`}>
-                    {connected ? "Connected" : "Not set"}
-                  </p>
+                  {svc.comingSoon ? (
+                    <p className="text-[10px] text-blue-accent">Coming Soon</p>
+                  ) : (
+                    <p className={`text-[10px] ${connected ? "text-green-accent" : "text-muted"}`}>
+                      {connected ? "Connected" : "Not set"}
+                    </p>
+                  )}
                 </div>
               </div>
             );

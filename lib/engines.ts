@@ -116,41 +116,32 @@ const mockResult = (engine: "kling" | "runway" | "vidu"): EngineResult => ({
   live: false
 });
 
-export const pickEngineForTier = (tier: ContentTier, attempt: number): "kling" | "runway" | "vidu" => {
-  const sequences: Record<ContentTier, Array<"kling" | "runway" | "vidu">> = {
-    premium: ["runway", "kling", "vidu"],
-    social: ["vidu", "kling", "runway"],
-    standard: ["kling", "vidu", "runway"]
-  };
-
-  const sequence = sequences[tier];
-  return sequence[Math.min(attempt, sequence.length - 1)];
+// TODO: Re-enable tier-based routing when Kling and Vidu API keys are connected
+// const TIER_SEQUENCES: Record<ContentTier, Array<"kling" | "runway" | "vidu">> = {
+//   premium: ["runway", "kling", "vidu"],
+//   standard: ["kling", "runway", "vidu"],
+//   social: ["vidu", "kling", "runway"],
+// };
+export const pickEngineForTier = (_tier: ContentTier, _attempt: number): "kling" | "runway" | "vidu" => {
+  return "runway";
 };
 
 export const generateWithEngine = async (
-  engine: "kling" | "runway" | "vidu",
+  _engine: "kling" | "runway" | "vidu",
   apiKeys: { kling: string; runway: string; vidu: string },
   input: EngineInput
 ): Promise<EngineResult> => {
-  console.log(`[ENGINE] engine=${engine}, hasRunwayKey=${!!apiKeys.runway}, hasKlingKey=${!!apiKeys.kling}, hasViduKey=${!!apiKeys.vidu}`);
-
-  if (engine === "runway" && apiKeys.runway) {
-    try {
-      return await generateWithRunway(apiKeys.runway, input);
-    } catch (err) {
-      console.error(`[ENGINE] Runway failed, falling back to mock:`, err instanceof Error ? err.message : err);
-      return mockResult("runway");
-    }
+  // TODO: Remove Runway-only override when Kling/Vidu keys are connected
+  if (!apiKeys.runway) {
+    console.error("[ENGINE] No Runway API key configured!");
+    return mockResult("runway");
   }
 
-  if (engine === "kling" && apiKeys.kling) {
-    console.log(`[ENGINE] Kling API not yet implemented, returning mock`);
+  try {
+    console.log(`[ENGINE] Routing ALL generation to Runway (requested: ${_engine})`);
+    return await generateWithRunway(apiKeys.runway, input);
+  } catch (err) {
+    console.error("[ENGINE] Runway failed:", err instanceof Error ? err.message : err);
+    return mockResult("runway");
   }
-
-  if (engine === "vidu" && apiKeys.vidu) {
-    console.log(`[ENGINE] Vidu API not yet implemented, returning mock`);
-  }
-
-  console.log(`[ENGINE] Using mock fallback for ${engine}`);
-  return mockResult(engine);
 };
