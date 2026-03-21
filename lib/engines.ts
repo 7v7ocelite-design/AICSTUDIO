@@ -9,6 +9,7 @@ const RUNWAY_MAX_POLLS = 60;
 export interface EngineResult {
   engine: "kling" | "runway" | "vidu";
   videoUrl: string;
+  live: boolean;
   raw?: unknown;
 }
 
@@ -46,6 +47,8 @@ const pollRunwayTask = async (taskId: string, apiKey: string): Promise<{ videoUr
       failureCode?: string;
     };
 
+    console.log(`[RUNWAY] Poll ${i + 1}: status=${data.status}`);
+
     if (data.status === "SUCCEEDED" && data.output?.length) {
       return { videoUrl: data.output[0], raw: data };
     }
@@ -82,6 +85,8 @@ const generateWithRunway = async (
     body.promptImage = input.referencePhotoUrl;
   }
 
+  console.log(`[RUNWAY] Calling ${endpoint} with model=${model}, prompt=${input.prompt.slice(0, 120)}...`);
+
   const createRes = await fetch(endpoint, {
     method: "POST",
     headers: runwayHeaders(apiKey),
@@ -98,59 +103,18 @@ const generateWithRunway = async (
     throw new Error("Runway create task returned no task ID");
   }
 
+  console.log(`[RUNWAY] Task created: ${created.id}`);
+
   const result = await pollRunwayTask(created.id, apiKey);
-  return { engine: "runway", videoUrl: result.videoUrl, raw: result.raw };
+  console.log(`[RUNWAY] Task succeeded, video URL: ${result.videoUrl.slice(0, 80)}...`);
+  return { engine: "runway", videoUrl: result.videoUrl, live: true, raw: result.raw };
 };
 
-const readVideoUrl = (data: Record<string, unknown>): string | null => {
-  const candidates = ["video_url", "videoUrl", "url", "output_url", "result_url"];
-  for (const key of candidates) {
-    const value = data[key];
-    if (typeof value === "string" && value.length > 0) {
-      return value;
-    }
-  }
-  return null;
-};
-
-const callEngine = async (
-  engine: "kling" | "runway" | "vidu",
-  endpoint: string,
-  apiKey: string,
-  input: EngineInput
-): Promise<EngineResult> => {
-  if (!apiKey) {
-    return { engine, videoUrl: FALLBACK_VIDEO_URL };
-  }
-
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        prompt: input.prompt,
-        reference_photo_url: input.referencePhotoUrl,
-        duration_seconds: input.durationSeconds ?? 8
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`${engine} request failed with status ${response.status}`);
-    }
-
-    const data = (await response.json()) as Record<string, unknown>;
-    return {
-      engine,
-      videoUrl: readVideoUrl(data) ?? FALLBACK_VIDEO_URL,
-      raw: data
-    };
-  } catch {
-    return { engine, videoUrl: FALLBACK_VIDEO_URL };
-  }
-};
+const mockResult = (engine: "kling" | "runway" | "vidu"): EngineResult => ({
+  engine,
+  videoUrl: FALLBACK_VIDEO_URL,
+  live: false
+});
 
 export const pickEngineForTier = (tier: ContentTier, attempt: number): "kling" | "runway" | "vidu" => {
   const sequences: Record<ContentTier, Array<"kling" | "runway" | "vidu">> = {
@@ -168,21 +132,25 @@ export const generateWithEngine = async (
   apiKeys: { kling: string; runway: string; vidu: string },
   input: EngineInput
 ): Promise<EngineResult> => {
+  console.log(`[ENGINE] engine=${engine}, hasRunwayKey=${!!apiKeys.runway}, hasKlingKey=${!!apiKeys.kling}, hasViduKey=${!!apiKeys.vidu}`);
+
   if (engine === "runway" && apiKeys.runway) {
     try {
       return await generateWithRunway(apiKeys.runway, input);
-    } catch {
-      return { engine: "runway", videoUrl: FALLBACK_VIDEO_URL };
+    } catch (err) {
+      console.error(`[ENGINE] Runway failed, falling back to mock:`, err instanceof Error ? err.message : err);
+      return mockResult("runway");
     }
   }
 
-  if (engine === "kling") {
-    return callEngine(engine, "https://api.klingai.com/v1/videos/generate", apiKeys.kling, input);
+  if (engine === "kling" && apiKeys.kling) {
+    console.log(`[ENGINE] Kling API not yet implemented, returning mock`);
   }
 
-  if (engine === "runway") {
-    return { engine: "runway", videoUrl: FALLBACK_VIDEO_URL };
+  if (engine === "vidu" && apiKeys.vidu) {
+    console.log(`[ENGINE] Vidu API not yet implemented, returning mock`);
   }
 
-  return callEngine(engine, "https://api.vidu.com/v1/video/generate", apiKeys.vidu, input);
+  console.log(`[ENGINE] Using mock fallback for ${engine}`);
+  return mockResult(engine);
 };

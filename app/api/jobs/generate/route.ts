@@ -81,6 +81,11 @@ export async function POST(request: NextRequest) {
     const workflow = parseWorkflowSettings(settingsMap);
     const assembledPrompt = buildVideoPrompt(athlete as Athlete, template as Template);
 
+    console.log("[GENERATE] Athlete:", athlete.name, "| Descriptor:", athlete.descriptor?.slice(0, 60));
+    console.log("[GENERATE] Template:", template.category, template.variant_name, "| Tier:", template.content_tier);
+    console.log("[GENERATE] Prompt:", assembledPrompt.slice(0, 200));
+    console.log("[GENERATE] Runway key:", workflow.runwayApiKey ? "SET" : "NOT SET");
+
     const { count: existingCount } = await supabase
       .from("jobs")
       .select("id", { count: "exact", head: true })
@@ -108,7 +113,7 @@ export async function POST(request: NextRequest) {
     let finalStatus: "approved" | "rejected" | "needs_review" = "rejected";
     let finalVideoUrl: string | null = null;
     let finalFaceScore = 0;
-    let finalEngine: "kling" | "runway" | "vidu" = "kling";
+    let finalEngine = "kling (mock)";
     let finalFileName: string | null = null;
 
     for (let attempt = 0; attempt <= workflow.maxRetries; attempt += 1) {
@@ -134,7 +139,7 @@ export async function POST(request: NextRequest) {
 
       const generated =
         n8nResult?.videoUrl && n8nResult?.engineUsed
-          ? { videoUrl: n8nResult.videoUrl, engine: n8nResult.engineUsed }
+          ? { videoUrl: n8nResult.videoUrl, engine: n8nResult.engineUsed, live: true }
           : await generateWithEngine(
               engine,
               {
@@ -147,6 +152,9 @@ export async function POST(request: NextRequest) {
                 referencePhotoUrl: athlete.reference_photo_url
               }
             );
+
+      const engineLabel = generated.live ? `${generated.engine} (live)` : `${generated.engine} (mock)`;
+      console.log(`[GENERATE] Result: engine=${engineLabel}, videoUrl=${generated.videoUrl.slice(0, 80)}`);
 
       const fileName = outputFilename;
       const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, fileName);
@@ -166,7 +174,8 @@ export async function POST(request: NextRequest) {
       finalVideoUrl = persistedUrl;
       finalFaceScore = faceScore;
       finalFileName = fileName;
-      finalEngine = generated.engine;
+      finalEngine = generated.live ? `${generated.engine} (live)` : `${generated.engine} (mock)`;
+
 
       if (faceScore >= workflow.autoApproveThreshold) {
         finalStatus = "approved";

@@ -210,7 +210,12 @@ export const JobQueues = ({
                 </span>
               </div>
             </div>
-            <p className="mt-1 text-xs text-muted">Engine: {job.engine_used ?? "n/a"}</p>
+            <p className="mt-1 text-xs">
+              <span className="text-muted">Engine: </span>
+              <span className={job.engine_used?.includes("(live)") ? "text-green-accent font-medium" : "text-muted"}>
+                {job.engine_used ?? "n/a"}
+              </span>
+            </p>
             {job.output_filename && (
               <p className="text-xs font-mono text-slate-500 truncate" title={job.output_filename}>
                 📁 {job.output_filename}
