@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
 
 import { mapApiError, readJsonBody, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
@@ -93,28 +94,20 @@ YOUR ROLE: Help craft optimized prompts. When suggesting a generation, output a 
 Be concise, creative, and enthusiastic. Keep responses under 200 words.`;
 
       const messages = [
-        ...body.history.map((h) => ({ role: h.role, content: h.content })),
+        ...body.history.map((h) => ({ role: h.role as "user" | "assistant", content: h.content })),
         { role: "user" as const, content: body.message }
       ];
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01"
-        },
-        body: JSON.stringify({
-          model: "claude-3-5-haiku-latest",
-          max_tokens: 600,
-          system: systemPrompt,
-          messages
-        })
+      const client = new Anthropic({ apiKey: anthropicKey });
+      const res = await client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 600,
+        system: systemPrompt,
+        messages
       });
 
-      if (res.ok) {
-        const data = (await res.json()) as { content?: Array<{ text?: string }> };
-        const text = data.content?.[0]?.text ?? "I couldn't generate a response. Try again.";
+      {
+        const text = res.content[0].type === "text" ? res.content[0].text : "I couldn't generate a response.";
 
         let recommendation: Record<string, string> | null = null;
         const jsonMatch = text.match(/```json\s*(\{[\s\S]*?\})\s*```/);

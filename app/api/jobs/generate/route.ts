@@ -12,6 +12,7 @@ import {
   scoreFaceMatch
 } from "@/lib/workflow";
 import { createJob, updateJob, fetchJob } from "@/lib/jobs-rpc";
+import { optimizePrompt, scoreVideo } from "@/lib/claude";
 
 interface GenerateBody {
   athleteId: string;
@@ -106,12 +107,27 @@ export async function POST(request: NextRequest) {
     const location = (template?.location as string) ?? "Studio";
 
     console.log("[GENERATE] Athlete:", athlete.name, "| Mode:", template ? "template" : "custom");
-    console.log("[GENERATE] Prompt:", assembledPrompt.slice(0, 200));
-    console.log("[DEBUG] Settings row count:", settingsRows?.length ?? 0);
-    console.log("[DEBUG] settingsMap keys:", Object.keys(settingsMap).join(", "));
-    console.log("[DEBUG] runway_api_key in map:", settingsMap["runway_api_key"] ? `SET (${settingsMap["runway_api_key"].slice(0, 12)}...)` : "EMPTY");
-    console.log("[DEBUG] workflow.runwayApiKey:", workflow.runwayApiKey ? `SET (${workflow.runwayApiKey.slice(0, 12)}...)` : "EMPTY");
-    console.log("[DEBUG] serverEnv.runwayApiKey:", process.env.RUNWAY_API_KEY ? "SET in env" : "NOT in env");
+    console.log("[GENERATE] Runway key:", workflow.runwayApiKey ? "SET" : "NOT SET");
+    console.log("[GENERATE] Claude key:", workflow.anthropicApiKey ? "SET" : "NOT SET");
+
+    // Claude prompt optimization
+    let finalPrompt = assembledPrompt;
+    if (workflow.anthropicApiKey) {
+      try {
+        console.log("[CLAUDE] Optimizing prompt...");
+        const optimized = await optimizePrompt(workflow.anthropicApiKey, assembledPrompt, {
+          athleteName: athlete.name,
+          templateCategory: category,
+          contentTier: (template?.content_tier as string) ?? "premium",
+          platform: (template?.platforms as string) ?? "Instagram"
+        });
+        finalPrompt = optimized.optimizedPrompt;
+        console.log("[CLAUDE] Optimized:", finalPrompt.slice(0, 150));
+      } catch (err) {
+        console.error("[CLAUDE] Optimization failed, using raw prompt:", err instanceof Error ? err.message : err);
+      }
+    }
+    console.log("[GENERATE] Final prompt:", finalPrompt.slice(0, 200));
 
     const templateIdForCount = payload.templateId ?? athlete.id;
     const { count: existingCount } = await supabase
@@ -123,12 +139,11 @@ export async function POST(request: NextRequest) {
 
     const outputFilename = buildOutputFileName(athlete.name, category, location, version);
 
-    // Create job via RPC (bypasses PostgREST schema cache)
     const { id: jobId } = await createJob(supabase, {
       athlete_id: athlete.id,
       template_id: (template?.id as string) ?? athlete.id,
       status: "queued",
-      assembled_prompt: assembledPrompt,
+      assembled_prompt: finalPrompt,
       output_filename: outputFilename,
       retry_count: 0
     });
@@ -136,13 +151,12 @@ export async function POST(request: NextRequest) {
     let finalStatus: "approved" | "rejected" | "needs_review" = "rejected";
     let finalVideoUrl: string | null = null;
     let finalFaceScore = 0;
-    let finalEngine = "kling (mock)";
+    let finalEngine = "runway (mock)";
     let finalFileName: string | null = null;
 
     for (let attempt = 0; attempt <= workflow.maxRetries; attempt += 1) {
       const tier = (template?.content_tier as "standard" | "premium" | "social") ?? "premium";
       const engine = pickEngineForTier(tier, attempt);
-      finalEngine = engine;
 
       await updateJob(supabase, jobId, {
         status: "generating",
@@ -156,7 +170,7 @@ export async function POST(request: NextRequest) {
         attempt,
         athlete,
         template,
-        prompt: assembledPrompt,
+        prompt: finalPrompt,
         output_filename: outputFilename,
         preferred_engine: engine
       });
@@ -172,28 +186,50 @@ export async function POST(request: NextRequest) {
                 vidu: workflow.viduApiKey
               },
               {
-                prompt: assembledPrompt,
+                prompt: finalPrompt,
                 referencePhotoUrl: athlete.reference_photo_url
               }
             );
 
       const engineLabel = generated.live ? `${generated.engine} (live)` : `${generated.engine} (mock)`;
-      console.log(`[GENERATE] Result: engine=${engineLabel}, videoUrl=${generated.videoUrl.slice(0, 80)}`);
+      console.log(`[GENERATE] Engine result: ${engineLabel}`);
 
       const fileName = outputFilename;
       const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, fileName);
 
       await updateJob(supabase, jobId, { status: "scoring" });
 
-      const faceScore =
-        n8nResult?.faceScore ??
-        (await scoreFaceMatch({
-          athleteName: athlete.name,
-          descriptor: athlete.descriptor,
-          templateVariant: (template?.variant_name as string) ?? "custom",
-          prompt: assembledPrompt,
-          anthropicApiKey: workflow.anthropicApiKey
-        }));
+      // Claude QC scoring (or fallback)
+      let faceScore: number;
+      if (workflow.anthropicApiKey) {
+        try {
+          console.log("[CLAUDE] Running QC scoring...");
+          const qc = await scoreVideo(workflow.anthropicApiKey, {
+            prompt: finalPrompt,
+            athleteName: athlete.name,
+            athleteDescriptor: athlete.descriptor ?? "",
+            templateCategory: category,
+            videoUrl: persistedUrl,
+            engineUsed: engineLabel,
+            live: generated.live
+          });
+          faceScore = qc.score;
+          console.log("[CLAUDE] QC Score:", faceScore, "|", qc.notes);
+        } catch (err) {
+          console.error("[CLAUDE] QC failed:", err instanceof Error ? err.message : err);
+          faceScore = n8nResult?.faceScore ?? 75;
+        }
+      } else {
+        faceScore = n8nResult?.faceScore ??
+          (await scoreFaceMatch({
+            athleteName: athlete.name,
+            descriptor: athlete.descriptor,
+            templateVariant: (template?.variant_name as string) ?? "custom",
+            prompt: finalPrompt,
+            anthropicApiKey: ""
+          }));
+      }
+      finalEngine = engineLabel;
 
       finalVideoUrl = persistedUrl;
       finalFaceScore = faceScore;
