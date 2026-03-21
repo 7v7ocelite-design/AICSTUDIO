@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import { buildOutputFileName } from "@/lib/workflow";
+import { createMockJobs } from "@/lib/jobs-rpc";
 import type { Job } from "@/lib/types";
 
 const ENGINES: Array<"kling" | "runway" | "vidu"> = ["kling", "runway", "vidu"];
@@ -65,15 +66,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const { data: inserted, error } = await supabase
-      .from("jobs")
-      .insert(mockJobs)
-      .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
-      .order("created_at", { ascending: false });
-
-    if (error) throw new Error(error.message);
-
-    return NextResponse.json({ data: (inserted ?? []) as Job[] }, { status: 201 });
+    const inserted = await createMockJobs(supabase, mockJobs);
+    return NextResponse.json({ data: inserted as Job[] }, { status: 201 });
   } catch (error) {
     const { status, message } = mapApiError(error);
     return NextResponse.json({ error: message }, { status });

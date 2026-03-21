@@ -11,6 +11,7 @@ import {
   parseWorkflowSettings,
   scoreFaceMatch
 } from "@/lib/workflow";
+import { createJob, updateJob, fetchJob } from "@/lib/jobs-rpc";
 
 interface GenerateBody {
   athleteId: string;
@@ -80,7 +81,6 @@ export async function POST(request: NextRequest) {
     const workflow = parseWorkflowSettings(settingsMap);
     const assembledPrompt = buildVideoPrompt(athlete as Athlete, template as Template);
 
-    // Determine version number based on existing jobs for this athlete+template combo
     const { count: existingCount } = await supabase
       .from("jobs")
       .select("id", { count: "exact", head: true })
@@ -95,27 +95,15 @@ export async function POST(request: NextRequest) {
       version
     );
 
-    // FUTURE API INTEGRATION POINT:
-    // When video engine APIs are connected, use `outputFilename` as the
-    // storage object name when uploading to Supabase Storage or Google Drive.
-    // Example: await supabase.storage.from('videos').upload(outputFilename, videoBuffer);
-
-    const { data: createdJob, error: createJobError } = await supabase
-      .from("jobs")
-      .insert({
-        athlete_id: athlete.id,
-        template_id: template.id,
-        status: "queued",
-        assembled_prompt: assembledPrompt,
-        output_filename: outputFilename,
-        retry_count: 0
-      })
-      .select("*")
-      .single();
-
-    if (createJobError || !createdJob) {
-      throw new Error(createJobError?.message ?? "Unable to create job.");
-    }
+    // Create job via RPC (bypasses PostgREST schema cache)
+    const { id: jobId } = await createJob(supabase, {
+      athlete_id: athlete.id,
+      template_id: template.id,
+      status: "queued",
+      assembled_prompt: assembledPrompt,
+      output_filename: outputFilename,
+      retry_count: 0
+    });
 
     let finalStatus: "approved" | "rejected" | "needs_review" = "rejected";
     let finalVideoUrl: string | null = null;
@@ -127,18 +115,15 @@ export async function POST(request: NextRequest) {
       const engine = pickEngineForTier(template.content_tier, attempt);
       finalEngine = engine;
 
-      await supabase
-        .from("jobs")
-        .update({
-          status: "generating",
-          retry_count: attempt,
-          engine_used: engine
-        })
-        .eq("id", createdJob.id);
+      await updateJob(supabase, jobId, {
+        status: "generating",
+        retry_count: attempt,
+        engine_used: engine
+      });
 
       const n8nResult = await callN8nWebhook(workflow.n8nWebhookUrl, {
         event: "job_created",
-        job_id: createdJob.id,
+        job_id: jobId,
         attempt,
         athlete,
         template,
@@ -166,7 +151,7 @@ export async function POST(request: NextRequest) {
       const fileName = outputFilename;
       const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, fileName);
 
-      await supabase.from("jobs").update({ status: "scoring" }).eq("id", createdJob.id);
+      await updateJob(supabase, jobId, { status: "scoring" });
 
       const faceScore =
         n8nResult?.faceScore ??
@@ -193,37 +178,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { error: finalizeError } = await supabase
-      .from("jobs")
-      .update({
-        status: finalStatus,
-        face_score: finalFaceScore,
-        video_url: finalVideoUrl,
-        engine_used: finalEngine,
-        file_name: finalFileName,
-        reviewed_at: new Date().toISOString()
-      })
-      .eq("id", createdJob.id);
-
-    if (finalizeError) {
-      throw new Error(finalizeError.message);
-    }
+    await updateJob(supabase, jobId, {
+      status: finalStatus,
+      face_score: finalFaceScore,
+      video_url: finalVideoUrl,
+      engine_used: finalEngine,
+      file_name: finalFileName,
+      reviewed_at: new Date().toISOString()
+    });
 
     if (finalStatus === "approved") {
       const nextTotal = (athlete.videos_generated ?? 0) + 1;
       await supabase.from("athletes").update({ videos_generated: nextTotal }).eq("id", athlete.id);
     }
 
-    const { data: finalJob, error: finalJobError } = await supabase
-      .from("jobs")
-      .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
-      .eq("id", createdJob.id)
-      .single();
-
-    if (finalJobError || !finalJob) {
-      throw new Error(finalJobError?.message ?? "Failed to fetch completed job.");
-    }
-
+    const finalJob = await fetchJob(supabase, jobId);
     return NextResponse.json({ data: finalJob as Job });
   } catch (error) {
     const { status, message } = mapApiError(error);

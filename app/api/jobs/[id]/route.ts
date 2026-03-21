@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { mapApiError, readJsonBody, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import { callDeliveryWebhook } from "@/lib/workflow";
+import { updateJob, fetchJob } from "@/lib/jobs-rpc";
 import type { Job } from "@/lib/types";
 
 interface PatchBody {
@@ -26,32 +27,21 @@ export async function PATCH(
 
     const supabase = getAdminSupabase();
 
-    const { data: job, error: updateError } = await supabase
-      .from("jobs")
-      .update({
-        status: body.status,
-        reviewed_at: new Date().toISOString()
-      })
-      .eq("id", params.id)
-      .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
-      .single();
+    await updateJob(supabase, params.id, {
+      status: body.status,
+      reviewed_at: new Date().toISOString()
+    });
 
-    if (updateError || !job) {
-      return NextResponse.json(
-        { error: updateError?.message ?? "Job not found." },
-        { status: 404 }
-      );
-    }
+    const job = await fetchJob(supabase, params.id);
 
     if (body.status === "approved") {
-      // Fire post-approval delivery webhook (n8n → Google Drive + Metricool)
       const { data: settingsRows } = await supabase
         .from("settings")
         .select("key, value")
         .eq("key", "n8n_webhook_url")
         .single();
       const webhookUrl = settingsRows?.value ?? "";
-      await callDeliveryWebhook(webhookUrl, job);
+      await callDeliveryWebhook(webhookUrl, job as unknown as Record<string, unknown>);
 
       if (job.athlete_id) {
         const { data: athlete } = await supabase
