@@ -69,8 +69,10 @@ const generateWithRunway = async (
     ? `${RUNWAY_BASE_URL}/image_to_video`
     : `${RUNWAY_BASE_URL}/text_to_video`;
 
+  const model = hasImage ? "gen4_turbo" : "gen4.5";
+
   const body: Record<string, unknown> = {
-    model: "gen4_turbo",
+    model,
     promptText: input.prompt.slice(0, 1000),
     duration: Math.min(input.durationSeconds ?? 10, 10),
     ratio: "1280:720"
