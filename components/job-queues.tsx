@@ -13,6 +13,7 @@ interface JobQueuesProps {
   onJobUpdate: (updatedJob: Job) => void;
   onJobsCreated: (newJobs: Job[]) => void;
   onRegenerate: (athleteId: string, templateId: string) => void;
+  initialTab?: QueueTab;
 }
 
 const formatDate = (dateString: string) =>
@@ -54,9 +55,10 @@ export const JobQueues = ({
   accessToken,
   onJobUpdate,
   onJobsCreated,
-  onRegenerate
+  onRegenerate,
+  initialTab
 }: JobQueuesProps) => {
-  const [activeTab, setActiveTab] = useState<QueueTab>("all");
+  const [activeTab, setActiveTab] = useState<QueueTab>(initialTab ?? "all");
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [creatingMock, setCreatingMock] = useState(false);
 
