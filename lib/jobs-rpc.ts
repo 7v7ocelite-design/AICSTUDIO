@@ -27,29 +27,30 @@ export const createJob = async (
   params: CreateJobParams
 ): Promise<{ id: string }> => {
   // Try RPC first (bypasses PostgREST schema cache)
-  const { data: rpcId, error: rpcError } = await supabase.rpc("create_job", {
-    p_athlete_id: params.athlete_id,
-    p_template_id: params.template_id,
-    p_status: params.status ?? "queued",
-    p_assembled_prompt: params.assembled_prompt ?? null,
-    p_output_filename: params.output_filename ?? null,
-    p_retry_count: params.retry_count ?? 0
-  });
+  try {
+    const { data: rpcId, error: rpcError } = await supabase.rpc("create_job", {
+      p_athlete_id: params.athlete_id,
+      p_template_id: params.template_id,
+      p_status: params.status ?? "queued",
+      p_assembled_prompt: params.assembled_prompt ?? null,
+      p_output_filename: params.output_filename ?? null,
+      p_retry_count: params.retry_count ?? 0
+    });
 
-  if (!rpcError && rpcId) {
-    return { id: rpcId as string };
+    if (!rpcError && rpcId) {
+      return { id: rpcId as string };
+    }
+  } catch {
+    // RPC not available — try fallback
   }
 
-  // Fallback: direct insert (works when schema cache is fresh, e.g. local dev)
+  // Fallback: insert with only core columns PostgREST definitely knows
   const { data, error } = await supabase
     .from("jobs")
     .insert({
       athlete_id: params.athlete_id,
       template_id: params.template_id,
-      status: params.status ?? "queued",
-      assembled_prompt: params.assembled_prompt,
-      output_filename: params.output_filename,
-      retry_count: params.retry_count ?? 0
+      status: params.status ?? "queued"
     })
     .select("id")
     .single();
@@ -64,31 +65,34 @@ export const updateJob = async (
   params: UpdateJobParams
 ): Promise<void> => {
   // Try RPC first
-  const { error: rpcError } = await supabase.rpc("update_job", {
-    p_id: jobId,
-    p_status: params.status ?? null,
-    p_face_score: params.face_score ?? null,
-    p_video_url: params.video_url ?? null,
-    p_engine_used: params.engine_used ?? null,
-    p_file_name: params.file_name ?? null,
-    p_retry_count: params.retry_count ?? null,
-    p_reviewed_at: params.reviewed_at ?? null
-  });
+  try {
+    const { error: rpcError } = await supabase.rpc("update_job", {
+      p_id: jobId,
+      p_status: params.status ?? null,
+      p_face_score: params.face_score ?? null,
+      p_video_url: params.video_url ?? null,
+      p_engine_used: params.engine_used ?? null,
+      p_file_name: params.file_name ?? null,
+      p_retry_count: params.retry_count ?? null,
+      p_reviewed_at: params.reviewed_at ?? null
+    });
 
-  if (!rpcError) return;
+    if (!rpcError) return;
+  } catch {
+    // RPC not available — try fallback
+  }
 
-  // Fallback: direct update
+  // Fallback: update only safe columns (status, face_score, video_url, engine_used are in original schema)
   const updates: Record<string, unknown> = {};
   if (params.status !== undefined) updates.status = params.status;
   if (params.face_score !== undefined) updates.face_score = params.face_score;
   if (params.video_url !== undefined) updates.video_url = params.video_url;
   if (params.engine_used !== undefined) updates.engine_used = params.engine_used;
-  if (params.file_name !== undefined) updates.file_name = params.file_name;
-  if (params.retry_count !== undefined) updates.retry_count = params.retry_count;
-  if (params.reviewed_at !== undefined) updates.reviewed_at = params.reviewed_at;
 
-  const { error } = await supabase.from("jobs").update(updates).eq("id", jobId);
-  if (error) throw new Error(error.message);
+  if (Object.keys(updates).length > 0) {
+    const { error } = await supabase.from("jobs").update(updates).eq("id", jobId);
+    if (error) throw new Error(error.message);
+  }
 };
 
 export const fetchJob = async (
@@ -110,26 +114,39 @@ export const createMockJobs = async (
   jobs: Array<Record<string, unknown>>
 ): Promise<Job[]> => {
   // Try RPC first
-  const { data: rpcIds, error: rpcError } = await supabase.rpc("create_mock_jobs", {
-    p_jobs: JSON.stringify(jobs)
-  });
+  try {
+    const { data: rpcIds, error: rpcError } = await supabase.rpc("create_mock_jobs", {
+      p_jobs: JSON.stringify(jobs)
+    });
 
-  if (!rpcError && rpcIds) {
-    const ids = (rpcIds as Array<string>).filter(Boolean);
-    if (ids.length > 0) {
-      const { data } = await supabase
-        .from("jobs")
-        .select(JOB_SELECT)
-        .in("id", ids)
-        .order("created_at", { ascending: false });
-      return (data ?? []) as Job[];
+    if (!rpcError && rpcIds) {
+      const ids = (rpcIds as Array<string>).filter(Boolean);
+      if (ids.length > 0) {
+        const { data } = await supabase
+          .from("jobs")
+          .select(JOB_SELECT)
+          .in("id", ids)
+          .order("created_at", { ascending: false });
+        return (data ?? []) as Job[];
+      }
     }
+  } catch {
+    // RPC not available — try fallback
   }
 
-  // Fallback: direct insert
+  // Fallback: insert with only core columns
+  const safeJobs = jobs.map((j) => ({
+    athlete_id: j.athlete_id,
+    template_id: j.template_id,
+    status: j.status,
+    face_score: j.face_score,
+    video_url: j.video_url,
+    engine_used: j.engine_used
+  }));
+
   const { data, error } = await supabase
     .from("jobs")
-    .insert(jobs)
+    .insert(safeJobs)
     .select(JOB_SELECT)
     .order("created_at", { ascending: false });
 
