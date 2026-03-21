@@ -17,6 +17,7 @@ export type ViewId =
   | "animate-photo"
   | "athletes"
   | "templates"
+  | "brands"
   | "all-jobs"
   | "approval-queue"
   | "review-queue"
@@ -144,6 +145,7 @@ export const Sidebar = ({
         {!collapsed && <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Library</p>}
         {navItem("athletes", <Users className="h-4 w-4" />, "Athletes")}
         {navItem("templates", <Film className="h-4 w-4" />, "Templates")}
+        {navItem("brands", <Wand2 className="h-4 w-4" />, "Brands")}
 
         <div className="my-2 border-t border-[var(--border-subtle)]" />
         {!collapsed && <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted">Production Queue</p>}

@@ -18,6 +18,9 @@ import { SettingsPanel } from "@/components/settings-panel";
 import { JobQueues } from "@/components/job-queues";
 import { AthleteModal } from "@/components/athlete-modal";
 import { TemplateModal } from "@/components/template-modal";
+import { AthleteDetailModal } from "@/components/athlete-detail-modal";
+import { BrandsView } from "@/components/brands-view";
+import { BrandModal } from "@/components/brand-modal";
 
 const ACCESS_TOKEN = "no-auth";
 
@@ -30,6 +33,8 @@ const StudioInner = () => {
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [athleteModalOpen, setAthleteModalOpen] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [selectedAthleteDetail, setSelectedAthleteDetail] = useState<Athlete | null>(null);
 
   const fetchBootstrap = useCallback(async () => {
     try {
@@ -68,6 +73,19 @@ const StudioInner = () => {
 
   const handleTemplateCreated = (template: Template) => {
     setData((prev) => prev ? { ...prev, templates: [template, ...prev.templates] } : prev);
+  };
+
+  const handleAthleteDeleted = (id: string) => {
+    setData((prev) => prev ? { ...prev, athletes: prev.athletes.filter((a) => a.id !== id) } : prev);
+  };
+
+  const handleAthleteUpdated = (updated: Athlete) => {
+    setData((prev) => prev ? { ...prev, athletes: prev.athletes.map((a) => a.id === updated.id ? updated : a) } : prev);
+    setSelectedAthleteDetail(updated);
+  };
+
+  const handleBrandCreated = () => {
+    void fetchBootstrap();
   };
 
   const handleRegenerate = (athleteId: string, templateId: string) => {
@@ -140,7 +158,17 @@ const StudioInner = () => {
           />
         );
       case "athletes":
-        return <AthletesView athletes={data.athletes} onAddAthlete={() => setAthleteModalOpen(true)} />;
+        return (
+          <AthletesView
+            athletes={data.athletes}
+            accessToken={ACCESS_TOKEN}
+            onAddAthlete={() => setAthleteModalOpen(true)}
+            onSelectAthlete={(a) => setSelectedAthleteDetail(a)}
+            onAthleteDeleted={handleAthleteDeleted}
+          />
+        );
+      case "brands":
+        return <BrandsView accessToken={ACCESS_TOKEN} onAddBrand={() => setBrandModalOpen(true)} />;
       case "templates":
         return <TemplatesView templates={data.templates} onAddTemplate={() => setTemplateModalOpen(true)} />;
       case "all-jobs":
@@ -238,6 +266,21 @@ const StudioInner = () => {
           accessToken={ACCESS_TOKEN}
           onClose={() => setTemplateModalOpen(false)}
           onCreated={handleTemplateCreated}
+        />
+      )}
+      {brandModalOpen && (
+        <BrandModal
+          accessToken={ACCESS_TOKEN}
+          onClose={() => setBrandModalOpen(false)}
+          onCreated={handleBrandCreated}
+        />
+      )}
+      {selectedAthleteDetail && (
+        <AthleteDetailModal
+          athlete={selectedAthleteDetail}
+          accessToken={ACCESS_TOKEN}
+          onClose={() => setSelectedAthleteDetail(null)}
+          onUpdated={handleAthleteUpdated}
         />
       )}
     </div>
