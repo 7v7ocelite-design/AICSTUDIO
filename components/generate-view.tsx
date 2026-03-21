@@ -12,7 +12,6 @@ interface GenerateViewProps {
   jobs: Job[];
   accessToken: string;
   onJobCreated: (job: Job) => void;
-  onSeedTemplates: () => Promise<void>;
 }
 
 const scoreColor = (score: number | null) => {
@@ -23,7 +22,7 @@ const scoreColor = (score: number | null) => {
 };
 
 export const GenerateView = ({
-  athletes, templates, jobs, accessToken, onJobCreated, onSeedTemplates
+  athletes, templates, jobs, accessToken, onJobCreated
 }: GenerateViewProps) => {
   const { toast } = useToast();
   const [selectedAthlete, setSelectedAthlete] = useState(athletes[0]?.id ?? "");
@@ -72,15 +71,6 @@ export const GenerateView = ({
         <h2 className="text-xl font-semibold">Generate Video</h2>
         <p className="text-sm text-secondary mt-1">Select athlete + template, then launch one-click AI video production.</p>
       </div>
-
-      {templates.length === 0 && (
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-8 text-center">
-          <p className="text-sm text-secondary mb-3">No templates found. Seed the default 45 V5 templates to get started.</p>
-          <button className="button-primary px-8 py-3" onClick={onSeedTemplates} type="button">
-            Seed Default Templates (15 × 3)
-          </button>
-        </div>
-      )}
 
       <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-6 space-y-5">
         <div className="grid gap-4 md:grid-cols-2">

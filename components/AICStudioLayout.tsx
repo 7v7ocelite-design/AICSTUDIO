@@ -67,21 +67,6 @@ const StudioInner = () => {
     setData((prev) => prev ? { ...prev, templates: [template, ...prev.templates] } : prev);
   };
 
-  const seedTemplates = async () => {
-    try {
-      const res = await fetch("/api/templates/seed", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
-      });
-      if (res.ok) {
-        await fetchBootstrap();
-        toast("45 default templates seeded.", "success");
-      }
-    } catch {
-      toast("Failed to seed templates.", "error");
-    }
-  };
-
   const handleRegenerate = (athleteId: string, templateId: string) => {
     void (async () => {
       try {
@@ -124,13 +109,12 @@ const StudioInner = () => {
             jobs={data.jobs}
             accessToken={ACCESS_TOKEN}
             onJobCreated={handleJobCreated}
-            onSeedTemplates={seedTemplates}
           />
         );
       case "athletes":
         return <AthletesView athletes={data.athletes} onAddAthlete={() => setAthleteModalOpen(true)} />;
       case "templates":
-        return <TemplatesView templates={data.templates} onAddTemplate={() => setTemplateModalOpen(true)} onSeedTemplates={seedTemplates} />;
+        return <TemplatesView templates={data.templates} onAddTemplate={() => setTemplateModalOpen(true)} />;
       case "all-jobs":
       case "approval-queue":
       case "review-queue":

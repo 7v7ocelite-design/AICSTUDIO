@@ -2,17 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
+import { seedDefaultTemplates } from "@/lib/seed-templates";
 import type { DashboardBootstrap } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
     await requireAuthenticatedOperator(request);
     const supabase = getAdminSupabase();
 
+    // Auto-seed templates on first load (before main queries)
+    const { count: templateCount } = await supabase
+      .from("templates")
+      .select("id", { count: "exact", head: true });
+
+    if ((templateCount ?? 0) === 0) {
+      await seedDefaultTemplates(supabase);
+    }
+
     const [{ data: athletes, error: athleteError }, { data: templates, error: templateError }, { data: jobs, error: jobsError }, { data: settings, error: settingsError }] =
       await Promise.all([
         supabase.from("athletes").select("*").order("created_at", { ascending: false }),
-        supabase.from("templates").select("*").order("category").order("variant_name"),
+        supabase.from("templates").select("*").order("category", { ascending: true }),
         supabase
           .from("jobs")
           .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")

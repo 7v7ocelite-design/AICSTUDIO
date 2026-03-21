@@ -23,7 +23,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAthleteForm, setShowAthleteForm] = useState(false);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const athleteFormRef = useRef<HTMLFormElement>(null);
   const templateFormRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -121,22 +120,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
         ? { ...current, jobs: [...newJobs, ...current.jobs] }
         : current
     );
-  };
-
-  const seedTemplates = async () => {
-    setSeeding(true);
-    try {
-      const response = await fetch("/api/templates/seed", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      if (response.ok) {
-        await fetchBootstrap();
-        setTimedNotice("45 default templates seeded successfully.");
-      }
-    } finally {
-      setSeeding(false);
-    }
   };
 
   const createAthlete = async (event: FormEvent<HTMLFormElement>) => {
@@ -297,21 +280,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           <p className="text-xs text-slate-400 mt-1">Needs Review</p>
         </div>
       </div>
-
-      {/* Seed Templates prompt */}
-      {data.templates.length === 0 && (
-        <div className="panel flex flex-col items-center gap-3 py-8 text-center">
-          <p className="text-sm text-slate-300">No templates found. Seed the default 45 V5 templates to get started.</p>
-          <button
-            className="button-primary px-8 py-3"
-            onClick={seedTemplates}
-            disabled={seeding}
-            type="button"
-          >
-            {seeding ? "Seeding…" : "Seed Default Templates (15 × 3)"}
-          </button>
-        </div>
-      )}
 
       {/* Generation + Queue */}
       <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">

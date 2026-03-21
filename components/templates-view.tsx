@@ -8,7 +8,6 @@ import type { Template } from "@/lib/types";
 interface TemplatesViewProps {
   templates: Template[];
   onAddTemplate: () => void;
-  onSeedTemplates: () => Promise<void>;
 }
 
 const tierBadge: Record<string, string> = {
@@ -17,7 +16,7 @@ const tierBadge: Record<string, string> = {
   social: "bg-amber-900/60 text-amber-300"
 };
 
-export const TemplatesView = ({ templates, onAddTemplate, onSeedTemplates }: TemplatesViewProps) => {
+export const TemplatesView = ({ templates, onAddTemplate }: TemplatesViewProps) => {
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState<string>("all");
 
@@ -48,13 +47,6 @@ export const TemplatesView = ({ templates, onAddTemplate, onSeedTemplates }: Tem
           <Plus className="h-4 w-4" /> Add Template
         </button>
       </div>
-
-      {templates.length === 0 && (
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-8 text-center">
-          <p className="text-sm text-secondary mb-3">No templates. Seed the V5 defaults to populate 45 templates.</p>
-          <button className="button-primary px-8 py-3" onClick={onSeedTemplates} type="button">Seed Default Templates</button>
-        </div>
-      )}
 
       {templates.length > 0 && (
         <>
