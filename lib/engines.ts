@@ -131,9 +131,11 @@ export const generateWithEngine = async (
   apiKeys: { kling: string; runway: string; vidu: string },
   input: EngineInput
 ): Promise<EngineResult> => {
-  // TODO: Remove Runway-only override when Kling/Vidu keys are connected
+  console.log(`[DEBUG-ENGINE] apiKeys.runway: ${apiKeys.runway ? `"${apiKeys.runway.slice(0, 12)}..." (len=${apiKeys.runway.length})` : "FALSY"}`);
+  console.log(`[DEBUG-ENGINE] apiKeys.runway truthy check: ${!!apiKeys.runway}`);
+
   if (!apiKeys.runway) {
-    console.error("[ENGINE] No Runway API key configured!");
+    console.error("[ENGINE] No Runway API key configured! Returning mock.");
     return mockResult("runway");
   }
 

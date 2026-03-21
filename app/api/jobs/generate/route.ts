@@ -107,7 +107,11 @@ export async function POST(request: NextRequest) {
 
     console.log("[GENERATE] Athlete:", athlete.name, "| Mode:", template ? "template" : "custom");
     console.log("[GENERATE] Prompt:", assembledPrompt.slice(0, 200));
-    console.log("[GENERATE] Runway key:", workflow.runwayApiKey ? "SET" : "NOT SET");
+    console.log("[DEBUG] Settings row count:", settingsRows?.length ?? 0);
+    console.log("[DEBUG] settingsMap keys:", Object.keys(settingsMap).join(", "));
+    console.log("[DEBUG] runway_api_key in map:", settingsMap["runway_api_key"] ? `SET (${settingsMap["runway_api_key"].slice(0, 12)}...)` : "EMPTY");
+    console.log("[DEBUG] workflow.runwayApiKey:", workflow.runwayApiKey ? `SET (${workflow.runwayApiKey.slice(0, 12)}...)` : "EMPTY");
+    console.log("[DEBUG] serverEnv.runwayApiKey:", process.env.RUNWAY_API_KEY ? "SET in env" : "NOT in env");
 
     const templateIdForCount = payload.templateId ?? athlete.id;
     const { count: existingCount } = await supabase
