@@ -1,10 +1,13 @@
 export type JobStatus =
   | "queued"
+  | "processing"
   | "generating"
   | "scoring"
+  | "completed"
   | "needs_review"
   | "approved"
-  | "rejected";
+  | "rejected"
+  | "failed";
 
 export type ContentTier = "standard" | "premium" | "social";
 
@@ -51,6 +54,8 @@ export interface Job {
   retry_count: number;
   created_at: string;
   reviewed_at: string | null;
+  runway_task_id?: string | null;
+  error_message?: string | null;
   athlete?: Pick<Athlete, "name"> | null;
   template?: Pick<Template, "variant_name" | "category" | "location"> | null;
 }

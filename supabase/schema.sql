@@ -35,7 +35,7 @@ create table if not exists jobs (
   athlete_id uuid references athletes(id) on delete cascade,
   template_id uuid references templates(id) on delete cascade,
   status text not null default 'queued'
-    check (status in ('queued', 'generating', 'scoring', 'needs_review', 'approved', 'rejected')),
+    check (status in ('queued', 'processing', 'generating', 'scoring', 'completed', 'needs_review', 'approved', 'rejected', 'failed')),
   assembled_prompt text,
   face_score float,
   video_url text,
@@ -44,7 +44,9 @@ create table if not exists jobs (
   output_filename text,
   retry_count integer default 0,
   created_at timestamp with time zone default now(),
-  reviewed_at timestamp with time zone
+  reviewed_at timestamp with time zone,
+  runway_task_id text,
+  error_message text
 );
 
 create table if not exists settings (
