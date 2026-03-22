@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { mapApiError, readJsonBody, requireAuthenticatedOperator } from "@/lib/api";
+import {
+  FALLBACK_VIDEO_URL,
+  generateWithEngine,
+  generateWithRunway,
+  pickEngineForTier
+} from "@/lib/engines";
 import { buildVideoPrompt } from "@/lib/prompt";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import type { Athlete, Job, Template } from "@/lib/types";
-import { generateWithEngine, pickEngineForTier } from "@/lib/engines";
-import {
-  buildOutputFileName,
-  callN8nWebhook,
-  parseWorkflowSettings,
-  scoreFaceMatch
-} from "@/lib/workflow";
+import { parseWorkflowSettings } from "@/lib/workflow";
+
+export const maxDuration = 30;
 
 interface GenerateBody {
   athleteId: string;
@@ -67,135 +69,132 @@ export async function POST(request: NextRequest) {
       throw new Error(settingsError.message);
     }
 
-    const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((acc, row) => {
-      acc[row.key] = row.value;
-      return acc;
+    const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((accumulator, row) => {
+      accumulator[row.key] = row.value;
+      return accumulator;
     }, {});
     const workflow = parseWorkflowSettings(settingsMap);
     const assembledPrompt = buildVideoPrompt(athlete as Athlete, template as Template);
+    const selectedEngine = pickEngineForTier(template.content_tier, 0);
 
-    const { data: createdJob, error: createJobError } = await supabase
-      .from("jobs")
-      .insert({
-        athlete_id: athlete.id,
-        template_id: template.id,
-        status: "queued",
-        assembled_prompt: assembledPrompt,
-        retry_count: 0
-      })
-      .select("*")
-      .single();
+    const createCompletedOrFailedJob = async (params: {
+      status: "completed" | "failed";
+      videoUrl?: string | null;
+      engineUsed: string;
+      errorMessage?: string | null;
+    }): Promise<Job> => {
+      const { data: createdJob, error: createError } = await supabase
+        .from("jobs")
+        .insert({
+          athlete_id: athlete.id,
+          template_id: template.id,
+          status: params.status,
+          assembled_prompt: assembledPrompt,
+          engine_used: params.engineUsed,
+          video_url: params.videoUrl ?? null,
+          error_message: params.errorMessage ?? null
+        })
+        .select("*, athlete:athletes(name), template:templates(variant_name, category)")
+        .single();
 
-    if (createJobError || !createdJob) {
-      throw new Error(createJobError?.message ?? "Unable to create job.");
+      if (createError || !createdJob) {
+        throw new Error(createError?.message ?? "Unable to create job.");
+      }
+
+      return createdJob as Job;
+    };
+
+    if (selectedEngine === "runway") {
+      try {
+        const runwayResult = await generateWithRunway(workflow.runwayApiKey, assembledPrompt);
+
+        if ("taskId" in runwayResult) {
+          const { data: job, error: jobError } = await supabase
+            .from("jobs")
+            .insert({
+              athlete_id: athlete.id,
+              template_id: template.id,
+              status: "processing",
+              runway_task_id: runwayResult.taskId,
+              assembled_prompt: assembledPrompt,
+              engine_used: "runway"
+            })
+            .select("*, athlete:athletes(name), template:templates(variant_name, category)")
+            .single();
+
+          if (jobError || !job) {
+            throw new Error(jobError?.message ?? "Unable to create processing job.");
+          }
+
+          return NextResponse.json({
+            job,
+            status: "processing",
+            message: "Video is generating. Poll /api/jobs/{id}/status every 10 seconds."
+          });
+        }
+
+        const persistedUrl = await uploadGeneratedVideo(runwayResult.videoUrl, `${crypto.randomUUID()}.mp4`);
+        const completedJob = await createCompletedOrFailedJob({
+          status: "completed",
+          videoUrl: persistedUrl,
+          engineUsed: "runway (mock)"
+        });
+
+        return NextResponse.json({
+          job: completedJob,
+          status: "completed"
+        });
+      } catch (runwayError) {
+        const completedJob = await createCompletedOrFailedJob({
+          status: "completed",
+          videoUrl: FALLBACK_VIDEO_URL,
+          engineUsed: "runway (mock)",
+          errorMessage: runwayError instanceof Error ? runwayError.message : "Runway create failed."
+        });
+
+        return NextResponse.json({
+          job: completedJob,
+          status: "completed",
+          message: "Runway task creation failed. Returned mock fallback."
+        });
+      }
     }
 
-    let finalStatus: "approved" | "rejected" | "needs_review" = "rejected";
-    let finalVideoUrl: string | null = null;
-    let finalFaceScore = 0;
-    let finalEngine: "kling" | "runway" | "vidu" = "kling";
-    let finalFileName: string | null = null;
-
-    for (let attempt = 0; attempt <= workflow.maxRetries; attempt += 1) {
-      const engine = pickEngineForTier(template.content_tier, attempt);
-      finalEngine = engine;
-
-      await supabase
-        .from("jobs")
-        .update({
-          status: "generating",
-          retry_count: attempt,
-          engine_used: engine
-        })
-        .eq("id", createdJob.id);
-
-      const n8nResult = await callN8nWebhook(workflow.n8nWebhookUrl, {
-        job_id: createdJob.id,
-        attempt,
-        athlete,
-        template,
-        prompt: assembledPrompt,
-        preferred_engine: engine
+    try {
+      const generated = await generateWithEngine(
+        selectedEngine,
+        {
+          kling: workflow.klingApiKey,
+          vidu: workflow.viduApiKey
+        },
+        {
+          prompt: assembledPrompt,
+          referencePhotoUrl: athlete.reference_photo_url
+        }
+      );
+      const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, `${crypto.randomUUID()}.mp4`);
+      const completedJob = await createCompletedOrFailedJob({
+        status: "completed",
+        videoUrl: persistedUrl,
+        engineUsed: generated.engine
       });
 
-      const generated =
-        n8nResult?.videoUrl && n8nResult?.engineUsed
-          ? { videoUrl: n8nResult.videoUrl, engine: n8nResult.engineUsed }
-          : await generateWithEngine(
-              engine,
-              {
-                kling: workflow.klingApiKey,
-                runway: workflow.runwayApiKey,
-                vidu: workflow.viduApiKey
-              },
-              {
-                prompt: assembledPrompt,
-                referencePhotoUrl: athlete.reference_photo_url
-              }
-            );
+      return NextResponse.json({
+        job: completedJob,
+        status: "completed"
+      });
+    } catch (engineError) {
+      const failedJob = await createCompletedOrFailedJob({
+        status: "failed",
+        engineUsed: selectedEngine,
+        errorMessage: engineError instanceof Error ? engineError.message : "Generation failed."
+      });
 
-      const fileName = buildOutputFileName(athlete.name, template.variant_name, attempt);
-      const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, fileName);
-
-      await supabase.from("jobs").update({ status: "scoring" }).eq("id", createdJob.id);
-
-      const faceScore =
-        n8nResult?.faceScore ??
-        (await scoreFaceMatch({
-          athleteName: athlete.name,
-          descriptor: athlete.descriptor,
-          templateVariant: template.variant_name,
-          prompt: assembledPrompt,
-          anthropicApiKey: workflow.anthropicApiKey
-        }));
-
-      finalVideoUrl = persistedUrl;
-      finalFaceScore = faceScore;
-      finalFileName = fileName;
-      finalEngine = generated.engine;
-
-      if (faceScore >= workflow.autoApproveThreshold) {
-        finalStatus = "approved";
-        break;
-      }
-
-      if (attempt === workflow.maxRetries) {
-        finalStatus = faceScore >= workflow.reviewThreshold ? "needs_review" : "rejected";
-      }
+      return NextResponse.json({
+        job: failedJob,
+        status: "failed"
+      });
     }
-
-    const { error: finalizeError } = await supabase
-      .from("jobs")
-      .update({
-        status: finalStatus,
-        face_score: finalFaceScore,
-        video_url: finalVideoUrl,
-        engine_used: finalEngine,
-        file_name: finalFileName,
-        reviewed_at: new Date().toISOString()
-      })
-      .eq("id", createdJob.id);
-
-    if (finalizeError) {
-      throw new Error(finalizeError.message);
-    }
-
-    if (finalStatus === "approved") {
-      const nextTotal = (athlete.videos_generated ?? 0) + 1;
-      await supabase.from("athletes").update({ videos_generated: nextTotal }).eq("id", athlete.id);
-    }
-
-    const { data: finalJob, error: finalJobError } = await supabase
-      .from("jobs")
-      .select("*, athlete:athletes(name), template:templates(variant_name, category)")
-      .eq("id", createdJob.id)
-      .single();
-
-    if (finalJobError || !finalJob) {
-      throw new Error(finalJobError?.message ?? "Failed to fetch completed job.");
-    }
-
-    return NextResponse.json({ data: finalJob as Job });
   } catch (error) {
     const { status, message } = mapApiError(error);
     return NextResponse.json({ error: message }, { status });

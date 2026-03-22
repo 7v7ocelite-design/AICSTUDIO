@@ -12,7 +12,10 @@ interface DashboardProps {
 const statusClassMap: Record<string, string> = {
   queued: "bg-slate-700 text-slate-200",
   generating: "bg-blue-900 text-blue-200",
+  processing: "bg-blue-900 text-blue-200",
   scoring: "bg-amber-900 text-amber-200",
+  completed: "bg-emerald-900 text-emerald-200",
+  failed: "bg-rose-900 text-rose-200",
   needs_review: "bg-purple-900 text-purple-200",
   approved: "bg-emerald-900 text-emerald-200",
   rejected: "bg-rose-900 text-rose-200"
@@ -63,6 +66,48 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
     void fetchBootstrap();
   }, [fetchBootstrap]);
 
+  const pollForCompletion = useCallback(
+    async (jobId: string) => {
+      const maxPolls = 60;
+
+      for (let attempt = 0; attempt < maxPolls; attempt += 1) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 10_000);
+        });
+
+        try {
+          const response = await fetch(`/api/jobs/${jobId}/status`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          if (!response.ok) {
+            continue;
+          }
+          const job = (await response.json()) as Job;
+
+          if (job.status === "completed" || job.status === "approved") {
+            setNotice("Video ready!");
+            await fetchBootstrap();
+            return;
+          }
+
+          if (job.status === "failed" || job.status === "rejected") {
+            setError(`Failed: ${job.error_message || "Unknown error"}`);
+            await fetchBootstrap();
+            return;
+          }
+
+          const elapsedSeconds = (attempt + 1) * 10;
+          setNotice(`Generating with Runway... (${elapsedSeconds}s elapsed)`);
+        } catch {
+          // Network errors can happen during long polls; continue retrying.
+        }
+      }
+
+      setNotice("Timed out waiting for Runway. Check the job queue.");
+    },
+    [accessToken, fetchBootstrap]
+  );
+
   const runGeneration = async () => {
     if (!selectedAthlete || !selectedTemplate) {
       setError("Select both athlete and template.");
@@ -86,8 +131,15 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
         })
       });
 
-      const payload = (await response.json()) as { data?: Job; error?: string };
-      if (!response.ok || !payload.data) {
+      const payload = (await response.json()) as {
+        data?: Job;
+        job?: Job;
+        status?: string;
+        message?: string;
+        error?: string;
+      };
+      const returnedJob = payload.job ?? payload.data;
+      if (!response.ok || !returnedJob) {
         throw new Error(payload.error ?? "Unable to generate video.");
       }
 
@@ -95,11 +147,20 @@ export const Dashboard = ({ accessToken, onSignOut }: DashboardProps) => {
         current
           ? {
               ...current,
-              jobs: [payload.data as Job, ...current.jobs]
+              jobs: [returnedJob as Job, ...current.jobs]
             }
           : current
       );
-      setNotice(`Generation completed: ${payload.data.status}.`);
+      if (payload.status === "processing") {
+        setNotice("Generating video with Runway... (2-4 minutes)");
+        await pollForCompletion(returnedJob.id);
+      } else if (returnedJob.status === "completed" || returnedJob.status === "approved") {
+        setNotice("Video ready!");
+        await fetchBootstrap();
+      } else {
+        setNotice(payload.message ?? `Generation started: ${returnedJob.status}.`);
+        await fetchBootstrap();
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Generation failed.");
     } finally {

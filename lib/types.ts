@@ -1,10 +1,13 @@
 export type JobStatus =
   | "queued"
   | "generating"
+  | "processing"
   | "scoring"
   | "needs_review"
   | "approved"
-  | "rejected";
+  | "rejected"
+  | "completed"
+  | "failed";
 
 export type ContentTier = "standard" | "premium" | "social";
 
@@ -47,6 +50,8 @@ export interface Job {
   video_url: string | null;
   engine_used: string | null;
   file_name: string | null;
+  runway_task_id?: string | null;
+  error_message?: string | null;
   retry_count: number;
   created_at: string;
   reviewed_at: string | null;
