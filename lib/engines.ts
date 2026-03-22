@@ -1,8 +1,8 @@
 import type { ContentTier } from "@/lib/types";
 
 const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
-const RUNWAY_API_VERSION = "2024-11-06";
-const RUNWAY_BASE_URL = "https://api.dev.runwayml.com/v1";
+export const RUNWAY_API_VERSION = "2024-11-06";
+export const RUNWAY_BASE_URL = "https://api.dev.runwayml.com/v1";
 const RUNWAY_POLL_INTERVAL_MS = 5000;
 const RUNWAY_MAX_POLLS = 60;
 
@@ -13,7 +13,7 @@ export interface EngineResult {
   raw?: unknown;
 }
 
-interface EngineInput {
+export interface EngineInput {
   prompt: string;
   referencePhotoUrl?: string | null;
   durationSeconds?: number;
@@ -146,4 +146,55 @@ export const generateWithEngine = async (
     console.error("[ENGINE] Runway failed:", err instanceof Error ? err.message : err);
     return mockResult("runway");
   }
+};
+
+/**
+ * Creates a Runway task and returns immediately with the task ID.
+ * Does NOT poll — the frontend polls /api/jobs/[id]/status instead.
+ * This keeps each serverless function call under 60 seconds (Vercel Hobby plan).
+ */
+export const createRunwayTaskOnly = async (
+  apiKey: string,
+  input: EngineInput
+): Promise<{ taskId: string }> => {
+  const hasImage = input.referencePhotoUrl &&
+    input.referencePhotoUrl.startsWith("http");
+
+  const endpoint = hasImage
+    ? `${RUNWAY_BASE_URL}/image_to_video`
+    : `${RUNWAY_BASE_URL}/text_to_video`;
+
+  const model = hasImage ? "gen4_turbo" : "gen4.5";
+
+  const body: Record<string, unknown> = {
+    model,
+    promptText: input.prompt.slice(0, 1000),
+    duration: Math.min(input.durationSeconds ?? 10, 10),
+    ratio: "1280:720"
+  };
+
+  if (hasImage) {
+    body.promptImage = input.referencePhotoUrl;
+  }
+
+  console.log(`[RUNWAY] Creating task (no-poll mode): ${endpoint}, model=${model}`);
+
+  const createRes = await fetch(endpoint, {
+    method: "POST",
+    headers: runwayHeaders(apiKey),
+    body: JSON.stringify(body)
+  });
+
+  if (!createRes.ok) {
+    const errText = await createRes.text().catch(() => "");
+    throw new Error(`Runway create task failed: HTTP ${createRes.status} — ${errText}`);
+  }
+
+  const created = (await createRes.json()) as { id?: string };
+  if (!created.id) {
+    throw new Error("Runway create task returned no task ID");
+  }
+
+  console.log(`[RUNWAY] Task created: ${created.id} — returning immediately for frontend polling`);
+  return { taskId: created.id };
 };

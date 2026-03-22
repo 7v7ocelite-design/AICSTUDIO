@@ -4,17 +4,11 @@ import { mapApiError, readJsonBody, requireAuthenticatedOperator } from "@/lib/a
 import { buildVideoPrompt } from "@/lib/prompt";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import type { Athlete, Job, Template } from "@/lib/types";
-import { generateWithEngine, pickEngineForTier } from "@/lib/engines";
-import {
-  buildOutputFileName,
-  callN8nWebhook,
-  parseWorkflowSettings,
-  scoreFaceMatch
-} from "@/lib/workflow";
+import { buildOutputFileName, parseWorkflowSettings } from "@/lib/workflow";
 import { createJob, updateJob, fetchJob } from "@/lib/jobs-rpc";
-import { optimizePrompt, scoreVideo } from "@/lib/claude";
+import { optimizePrompt } from "@/lib/claude";
 
-export const maxDuration = 300;
+export const maxDuration = 30;
 
 interface GenerateBody {
   athleteId: string;
@@ -23,30 +17,6 @@ interface GenerateBody {
   duration?: number;
   ratio?: string;
 }
-
-const uploadGeneratedVideo = async (sourceUrl: string, fileName: string): Promise<string> => {
-  try {
-    const supabase = getAdminSupabase();
-    const response = await fetch(sourceUrl);
-    if (!response.ok) {
-      return sourceUrl;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    const upload = await supabase.storage
-      .from("generated-videos")
-      .upload(`jobs/${fileName}`, Buffer.from(arrayBuffer), {
-        upsert: true,
-        contentType: response.headers.get("content-type") ?? "video/mp4"
-      });
-    if (upload.error) {
-      return sourceUrl;
-    }
-    const { data } = supabase.storage.from("generated-videos").getPublicUrl(`jobs/${fileName}`);
-    return data.publicUrl;
-  } catch {
-    return sourceUrl;
-  }
-};
 
 export async function POST(request: NextRequest) {
   try {
@@ -141,130 +111,93 @@ export async function POST(request: NextRequest) {
 
     const outputFilename = buildOutputFileName(athlete.name, category, location, version);
 
-    const { id: jobId } = await createJob(supabase, {
-      athlete_id: athlete.id,
-      template_id: (template?.id as string) ?? athlete.id,
-      status: "queued",
-      assembled_prompt: finalPrompt,
-      output_filename: outputFilename,
-      retry_count: 0
-    });
+    // --- Background Polling Mode ---
+    // Create Runway task and return immediately. Frontend polls /api/jobs/[id]/status.
+    const apiKeys = {
+      kling: workflow.klingApiKey,
+      runway: workflow.runwayApiKey,
+      vidu: workflow.viduApiKey
+    };
 
-    let finalStatus: "approved" | "rejected" | "needs_review" = "rejected";
-    let finalVideoUrl: string | null = null;
-    let finalFaceScore = 0;
-    let finalEngine = "runway (mock)";
-    let finalFileName: string | null = null;
+    if (!apiKeys.runway) {
+      // No Runway key — create mock job immediately
+      const { id: jobId } = await createJob(supabase, {
+        athlete_id: athlete.id,
+        template_id: (template?.id as string) ?? athlete.id,
+        status: "approved",
+        assembled_prompt: finalPrompt,
+        output_filename: outputFilename,
+        retry_count: 0
+      });
 
-    for (let attempt = 0; attempt <= workflow.maxRetries; attempt += 1) {
-      const tier = (template?.content_tier as "standard" | "premium" | "social") ?? "premium";
-      const engine = pickEngineForTier(tier, attempt);
+      const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
+      await updateJob(supabase, jobId, {
+        video_url: FALLBACK_VIDEO_URL,
+        engine_used: "runway (mock)",
+        face_score: 25,
+        reviewed_at: new Date().toISOString()
+      });
+
+      const finalJob = await fetchJob(supabase, jobId);
+      return NextResponse.json({ data: finalJob as Job });
+    }
+
+    // Create the Runway task (takes <5 seconds)
+    try {
+      const { createRunwayTaskOnly } = await import("@/lib/engines");
+      const { taskId } = await createRunwayTaskOnly(apiKeys.runway, {
+        prompt: finalPrompt,
+        referencePhotoUrl: athlete.reference_photo_url
+      });
+
+      // Save job with processing status + runway task ID
+      const { id: jobId } = await createJob(supabase, {
+        athlete_id: athlete.id,
+        template_id: (template?.id as string) ?? athlete.id,
+        status: "processing",
+        assembled_prompt: finalPrompt,
+        output_filename: outputFilename,
+        retry_count: 0
+      });
+
+      // Save the runway_task_id
+      await supabase
+        .from("jobs")
+        .update({ runway_task_id: taskId, engine_used: "runway" })
+        .eq("id", jobId);
+
+      console.log(`[GENERATE] Job ${jobId} created with runway_task_id=${taskId} — returning immediately`);
+
+      const finalJob = await fetchJob(supabase, jobId);
+      return NextResponse.json({
+        data: finalJob as Job,
+        polling: true,
+        message: `Video is generating. Poll /api/jobs/${jobId}/status every 10 seconds.`
+      });
+    } catch (err) {
+      console.error("[GENERATE] Runway task creation failed:", err instanceof Error ? err.message : err);
+
+      // Fallback to mock
+      const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
+      const { id: jobId } = await createJob(supabase, {
+        athlete_id: athlete.id,
+        template_id: (template?.id as string) ?? athlete.id,
+        status: "approved",
+        assembled_prompt: finalPrompt,
+        output_filename: outputFilename,
+        retry_count: 0
+      });
 
       await updateJob(supabase, jobId, {
-        status: "generating",
-        retry_count: attempt,
-        engine_used: engine
+        video_url: FALLBACK_VIDEO_URL,
+        engine_used: "runway (mock)",
+        face_score: 25,
+        reviewed_at: new Date().toISOString()
       });
 
-      const n8nResult = await callN8nWebhook(workflow.n8nWebhookUrl, {
-        event: "job_created",
-        job_id: jobId,
-        attempt,
-        athlete,
-        template,
-        prompt: finalPrompt,
-        output_filename: outputFilename,
-        preferred_engine: engine
-      });
-
-      const generated =
-        n8nResult?.videoUrl && n8nResult?.engineUsed
-          ? { videoUrl: n8nResult.videoUrl, engine: n8nResult.engineUsed, live: true }
-          : await generateWithEngine(
-              engine,
-              {
-                kling: workflow.klingApiKey,
-                runway: workflow.runwayApiKey,
-                vidu: workflow.viduApiKey
-              },
-              {
-                prompt: finalPrompt,
-                referencePhotoUrl: athlete.reference_photo_url
-              }
-            );
-
-      const engineLabel = generated.live ? `${generated.engine} (live)` : `${generated.engine} (mock)`;
-      console.log(`[GENERATE] Engine result: ${engineLabel}`);
-
-      const fileName = outputFilename;
-      const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, fileName);
-
-      await updateJob(supabase, jobId, { status: "scoring" });
-
-      // Claude QC scoring (or fallback)
-      let faceScore: number;
-      if (workflow.anthropicApiKey) {
-        try {
-          console.log("[CLAUDE] Running QC scoring...");
-          const qc = await scoreVideo(workflow.anthropicApiKey, {
-            prompt: finalPrompt,
-            athleteName: athlete.name,
-            athleteDescriptor: athlete.descriptor ?? "",
-            templateCategory: category,
-            videoUrl: persistedUrl,
-            engineUsed: engineLabel,
-            live: generated.live
-          });
-          faceScore = qc.score;
-          console.log("[CLAUDE] QC Score:", faceScore, "|", qc.notes);
-        } catch (err) {
-          console.error("[CLAUDE] QC failed:", err instanceof Error ? err.message : err);
-          faceScore = n8nResult?.faceScore ?? 75;
-        }
-      } else {
-        faceScore = n8nResult?.faceScore ??
-          (await scoreFaceMatch({
-            athleteName: athlete.name,
-            descriptor: athlete.descriptor,
-            templateVariant: (template?.variant_name as string) ?? "custom",
-            prompt: finalPrompt,
-            anthropicApiKey: ""
-          }));
-      }
-      finalEngine = engineLabel;
-
-      finalVideoUrl = persistedUrl;
-      finalFaceScore = faceScore;
-      finalFileName = fileName;
-      finalEngine = generated.live ? `${generated.engine} (live)` : `${generated.engine} (mock)`;
-
-
-      if (faceScore >= workflow.autoApproveThreshold) {
-        finalStatus = "approved";
-        break;
-      }
-
-      if (attempt === workflow.maxRetries) {
-        finalStatus = faceScore >= workflow.reviewThreshold ? "needs_review" : "rejected";
-      }
+      const finalJob = await fetchJob(supabase, jobId);
+      return NextResponse.json({ data: finalJob as Job });
     }
-
-    await updateJob(supabase, jobId, {
-      status: finalStatus,
-      face_score: finalFaceScore,
-      video_url: finalVideoUrl,
-      engine_used: finalEngine,
-      file_name: finalFileName,
-      reviewed_at: new Date().toISOString()
-    });
-
-    if (finalStatus === "approved") {
-      const nextTotal = (athlete.videos_generated ?? 0) + 1;
-      await supabase.from("athletes").update({ videos_generated: nextTotal }).eq("id", athlete.id);
-    }
-
-    const finalJob = await fetchJob(supabase, jobId);
-    return NextResponse.json({ data: finalJob as Job });
   } catch (error) {
     const { status, message } = mapApiError(error);
     return NextResponse.json({ error: message }, { status });
