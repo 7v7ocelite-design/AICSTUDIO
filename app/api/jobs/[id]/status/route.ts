@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getAdminSupabase } from "@/lib/supabase/admin";
-import { RUNWAY_API_VERSION, RUNWAY_BASE_URL } from "@/lib/engines";
+import { RUNWAY_API_VERSION } from "@/lib/engines";
 import { serverEnv } from "@/lib/env";
+import { parseWorkflowSettings } from "@/lib/workflow";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -29,20 +30,31 @@ export async function GET(
   }
 
   // If still processing and has a Runway task, poll Runway
-  if (job.runway_task_id) {
-    const { data: settings } = await supabase
+  if (job.runway_task_id && typeof job.runway_task_id === "string") {
+    const { data: settingsRows } = await supabase
       .from("settings")
       .select("key, value")
       .in("key", ["runway_api_key"]);
 
-    const runwayKey =
-      settings?.find((s: { key: string; value: string }) => s.key === "runway_api_key")?.value
-      || serverEnv.runwayApiKey;
+    const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((accumulator, row) => {
+      accumulator[row.key] = row.value;
+      return accumulator;
+    }, {});
+
+    // Use the same key resolution pattern as generate route.
+    const workflow = parseWorkflowSettings(settingsMap);
+    let runwayKey = workflow.runwayApiKey || "";
+    if (!runwayKey) {
+      runwayKey = settingsMap.runway_api_key || "";
+    }
+    if (!runwayKey) {
+      runwayKey = serverEnv.runwayApiKey || "";
+    }
 
     if (runwayKey) {
       try {
         const pollRes = await fetch(
-          `${RUNWAY_BASE_URL}/tasks/${job.runway_task_id}`,
+          `https://api.dev.runwayml.com/v1/tasks/${job.runway_task_id}`,
           {
             headers: {
               Authorization: `Bearer ${runwayKey}`,
@@ -52,30 +64,29 @@ export async function GET(
         );
 
         const pollData = await pollRes.json();
-        console.log(
-          `[STATUS] Job ${params.id}: Runway task ${job.runway_task_id} → ${pollData.status}, progress=${pollData.progress}`
-        );
+        const runwayStatus = typeof pollData.status === "string" ? pollData.status : "UNKNOWN";
+        console.log(`[STATUS] Polling Runway task ${job.runway_task_id}: ${runwayStatus}`);
 
-        if (pollData.status === "SUCCEEDED" && pollData.output?.length) {
+        if (runwayStatus === "SUCCEEDED" && pollData.output?.length) {
           const videoUrl = pollData.output[0];
           await supabase
             .from("jobs")
             .update({
-              status: "completed",
+              status: "approved",
               video_url: videoUrl,
-              engine_used: "runway (live)"
+              engine_used: "runway"
             })
             .eq("id", params.id);
 
           return NextResponse.json({
             ...job,
-            status: "completed",
+            status: "approved",
             video_url: videoUrl,
-            engine_used: "runway (live)"
+            engine_used: "runway"
           });
         }
 
-        if (pollData.status === "FAILED") {
+        if (runwayStatus === "FAILED") {
           const errMsg = pollData.failure || pollData.failureCode || "Runway generation failed";
           await supabase
             .from("jobs")
@@ -85,17 +96,16 @@ export async function GET(
           return NextResponse.json({ ...job, status: "failed", error_message: errMsg });
         }
 
-        // Still running — return current status
-        return NextResponse.json({
-          ...job,
-          status: "processing",
-          runway_status: pollData.status,
-          progress: pollData.progress ?? null
-        });
+        // Still running — return current status as-is.
+        if (runwayStatus === "RUNNING" || runwayStatus === "THROTTLED") {
+          return NextResponse.json(job);
+        }
+
+        return NextResponse.json(job);
       } catch (err) {
         const message = err instanceof Error ? err.message : "unknown";
         console.error("[STATUS] Runway poll error:", message);
-        return NextResponse.json({ ...job, status: "processing" });
+        return NextResponse.json(job);
       }
     } else {
       console.error("[STATUS] No Runway API key found in settings or env vars");
