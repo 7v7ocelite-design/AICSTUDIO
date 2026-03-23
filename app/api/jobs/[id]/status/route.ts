@@ -65,7 +65,7 @@ export async function GET(
 
         const pollData = await pollRes.json();
         const runwayStatus = typeof pollData.status === "string" ? pollData.status : "UNKNOWN";
-        console.log(`[STATUS] Polling Runway task ${job.runway_task_id}: ${runwayStatus}`);
+        console.log(`[STATUS] Polling Runway task ${job.runway_task_id}: ${runwayStatus} | Full response: ${JSON.stringify(pollData).slice(0, 500)}`);
 
         if (runwayStatus === "SUCCEEDED" && pollData.output?.length) {
           const videoUrl = pollData.output[0];
