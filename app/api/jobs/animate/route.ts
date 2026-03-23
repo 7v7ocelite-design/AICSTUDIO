@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     const { id: jobId } = await createJob(supabase, {
       athlete_id: athlete.id,
-      template_id: athlete.id,
+      template_id: null,
       status: "generating",
       assembled_prompt: promptText,
       output_filename: outputFilename

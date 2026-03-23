@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       throw new Error(settingsError.message);
     }
 
-    let template: Record<string, unknown> | null = null;
+    let template: Template | null = null;
     if (payload.templateId) {
       const { data: t, error: tErr } = await supabase
         .from("templates")
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     const assembledPrompt = payload.custom_prompt
       ? payload.custom_prompt
       : template
-        ? buildVideoPrompt(athlete as Athlete, template as unknown as Template)
+        ? buildVideoPrompt(athlete as Athlete, template)
         : `${athlete.descriptor}. Cinematic quality, photorealistic, 4K.`;
 
     const category = (template?.category as string) ?? "Custom";
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
       // No Runway key — create mock job immediately
       const { id: jobId } = await createJob(supabase, {
         athlete_id: athlete.id,
-        template_id: (template?.id as string) ?? athlete.id,
+        template_id: template?.id ?? null,
         status: "approved",
         assembled_prompt: finalPrompt,
         output_filename: outputFilename,
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
       // Save job with processing status + runway task ID
       const { id: jobId } = await createJob(supabase, {
         athlete_id: athlete.id,
-        template_id: (template?.id as string) ?? athlete.id,
+        template_id: template?.id ?? null,
         status: "processing",
         assembled_prompt: finalPrompt,
         output_filename: outputFilename,
@@ -181,7 +181,7 @@ export async function POST(request: NextRequest) {
       const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
       const { id: jobId } = await createJob(supabase, {
         athlete_id: athlete.id,
-        template_id: (template?.id as string) ?? athlete.id,
+        template_id: template?.id ?? null,
         status: "approved",
         assembled_prompt: finalPrompt,
         output_filename: outputFilename,
