@@ -191,11 +191,15 @@ export const JobQueues = ({
             let nextProgress = current.progress;
             let hasRealProgress = current.hasRealProgress;
 
-            if (rawProgress !== null) {
-              // Status endpoint returns progress as 0-1; convert to percentage for UI ring.
+            if (rawProgress !== null && rawProgress > 0) {
+              // Only treat non-zero progress as real (Runway stays at 0 until done)
               const progressPercent = Math.round(Math.max(0, Math.min(1, rawProgress)) * 100);
               nextProgress = progressPercent;
               hasRealProgress = true;
+            } else if (!hasRealProgress) {
+              // Use time-based estimate when Runway reports 0 progress
+              const estimatedProgress = Math.min(90, (current.elapsed / 300) * 100);
+              nextProgress = Math.max(current.progress, estimatedProgress);
             }
 
             return {
@@ -270,16 +274,14 @@ export const JobQueues = ({
     const state = jobProgress[jobId];
     if (!state) return null;
 
-    if (state.hasRealProgress) {
-      const status = state.runwayStatus ?? "RUNNING";
-      return `Generating with Runway... (${state.elapsed}s elapsed · ${status} · ${Math.round(state.progress)}%)`;
+    const pct = `${Math.round(state.progress)}%`;
+    const status = state.runwayStatus;
+
+    if (status) {
+      return `Generating with Runway... (${state.elapsed}s elapsed · ${status} · ${pct})`;
     }
 
-    if (state.runwayStatus) {
-      return `Generating with Runway... (${state.elapsed}s elapsed · ${state.runwayStatus})`;
-    }
-
-    return `Generating with Runway... (${state.elapsed}s elapsed)`;
+    return `Generating with Runway... (${state.elapsed}s elapsed · ${pct})`;
   };
 
   return (
