@@ -177,7 +177,7 @@ export const createRunwayTaskOnly = async (
     body.promptImage = input.referencePhotoUrl;
   }
 
-  console.log(`[RUNWAY] Creating task (no-poll mode): ${endpoint}, model=${model}`);
+  console.log(`[RUNWAY] Creating task: endpoint=${endpoint}, model=${model}, apiKey=${apiKey ? apiKey.slice(0, 8) + "..." : "MISSING"}`);
 
   const createRes = await fetch(endpoint, {
     method: "POST",
@@ -187,6 +187,7 @@ export const createRunwayTaskOnly = async (
 
   if (!createRes.ok) {
     const errText = await createRes.text().catch(() => "");
+    console.error(`[RUNWAY] Task creation HTTP error: status=${createRes.status}, body=${errText}`);
     throw new Error(`Runway create task failed: HTTP ${createRes.status} — ${errText}`);
   }
 

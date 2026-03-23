@@ -175,7 +175,9 @@ export async function POST(request: NextRequest) {
         message: `Video is generating. Poll /api/jobs/${jobId}/status every 10 seconds.`
       });
     } catch (err) {
-      console.error("[GENERATE] Runway task creation failed:", err instanceof Error ? err.message : err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[GENERATE] Runway task creation failed:", errMsg);
+      console.error("[GENERATE] Full error:", JSON.stringify(err, Object.getOwnPropertyNames(err instanceof Error ? err : {}), 2));
 
       // Fallback to mock
       const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
