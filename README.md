@@ -56,19 +56,25 @@ npm run dev
 - `GET /api/bootstrap` — dashboard data (athletes, templates, jobs, settings)
 - `POST /api/athletes` — create athlete + optional reference photo upload
 - `POST /api/templates` — create prompt template
-- `POST /api/jobs/generate` — fully automated generation pipeline
+- `POST /api/jobs/generate` — create generation job (Runway returns task immediately)
+- `POST /api/jobs/animate` — create image-to-video job (Runway returns task immediately)
+- `GET /api/jobs/[id]/status` — poll Runway task status and update job row
 
 ## Automation Pipeline
 
-`POST /api/jobs/generate` performs:
+Runway generation is implemented with background polling to support Vercel Hobby function limits:
 
-1. Prompt assembly from athlete + template metadata
-2. Engine selection by content tier (`kling`, `runway`, `vidu`)
-3. Optional n8n webhook orchestration
-4. Video generation via provider adapter (with stable fallback URL)
-5. Face-match scoring using Anthropic (or deterministic fallback if key is missing)
-6. Auto-approval / retry / rejection logic based on Supabase settings table
-7. Video upload into Supabase Storage and job finalization
+1. `POST /api/jobs/generate` (or `/animate`) creates a Runway task and stores `runway_task_id`
+2. Route returns quickly with job `status: "processing"` (no long polling inside request)
+3. Frontend polls `GET /api/jobs/{id}/status` every 10 seconds
+4. Status route checks Runway and updates job to `completed` or `failed`
+
+For existing Supabase projects, ensure these columns exist:
+
+```sql
+alter table jobs add column if not exists runway_task_id text;
+alter table jobs add column if not exists error_message text;
+```
 
 ## Deployment
 

@@ -1,12 +1,12 @@
 export type JobStatus =
   | "queued"
-  | "processing"
   | "generating"
+  | "processing"
   | "scoring"
-  | "completed"
   | "needs_review"
   | "approved"
   | "rejected"
+  | "completed"
   | "failed";
 
 export type ContentTier = "standard" | "premium" | "social";
@@ -50,14 +50,13 @@ export interface Job {
   video_url: string | null;
   engine_used: string | null;
   file_name: string | null;
-  output_filename: string | null;
+  runway_task_id?: string | null;
+  error_message?: string | null;
   retry_count: number;
   created_at: string;
   reviewed_at: string | null;
-  runway_task_id?: string | null;
-  error_message?: string | null;
   athlete?: Pick<Athlete, "name"> | null;
-  template?: Pick<Template, "variant_name" | "category" | "location"> | null;
+  template?: Pick<Template, "variant_name" | "category"> | null;
 }
 
 export type SettingKey =

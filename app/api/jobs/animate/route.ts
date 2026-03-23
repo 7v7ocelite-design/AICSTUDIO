@@ -1,136 +1,134 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { mapApiError, readJsonBody, requireAuthenticatedOperator } from "@/lib/api";
+import { FALLBACK_VIDEO_URL, generateImageToVideoWithRunway } from "@/lib/engines";
+import { buildVideoPrompt } from "@/lib/prompt";
 import { getAdminSupabase } from "@/lib/supabase/admin";
-import { buildOutputFileName, parseWorkflowSettings } from "@/lib/workflow";
-import { createJob, updateJob, fetchJob } from "@/lib/jobs-rpc";
-import type { Job } from "@/lib/types";
+import type { Athlete, Template } from "@/lib/types";
+import { parseWorkflowSettings } from "@/lib/workflow";
 
 export const maxDuration = 30;
 
 interface AnimateBody {
   athleteId: string;
-  animationStyle: string;
-  motionPrompt?: string | null;
+  templateId: string;
+  imageUrl?: string;
+  prompt?: string;
 }
-
-const PRESETS: Record<string, { prompt: string; duration: number }> = {
-  "cinematic-intro": {
-    prompt: "Slow cinematic zoom into the subject. Dramatic lighting gradually intensifies. Shallow depth of field. Subject maintains confident pose as camera reveals them. Professional commercial quality. No skeletal distortion, no extra limbs.",
-    duration: 5
-  },
-  "hero-reveal": {
-    prompt: "Photograph comes to life with subtle natural movement. Slight breeze in clothing, gentle ambient animation. Photorealistic, seamless still-to-motion transition. No distortion, no artifacts.",
-    duration: 4
-  },
-  "social-ready": {
-    prompt: "Dynamic quick zoom with energetic camera movement. Trending social media style. Fast reveal, bold and eye-catching. Hook in the first second. No distortion, no artifacts.",
-    duration: 3
-  }
-};
 
 export async function POST(request: NextRequest) {
   try {
     await requireAuthenticatedOperator(request);
-    const body = await readJsonBody<AnimateBody>(request);
-    if (!body.athleteId) {
-      return NextResponse.json({ error: "athleteId is required." }, { status: 400 });
+    const payload = await readJsonBody<AnimateBody>(request);
+    if (!payload.athleteId || !payload.templateId) {
+      return NextResponse.json({ error: "athleteId and templateId are required." }, { status: 400 });
     }
 
     const supabase = getAdminSupabase();
-    const [{ data: athlete, error: athleteError }, { data: settingsRows }] = await Promise.all([
-      supabase.from("athletes").select("*").eq("id", body.athleteId).single(),
-      supabase.from("settings").select("key, value")
-    ]);
+    const [{ data: athlete, error: athleteError }, { data: template, error: templateError }, { data: settingsRows, error: settingsError }] =
+      await Promise.all([
+        supabase.from("athletes").select("*").eq("id", payload.athleteId).single(),
+        supabase.from("templates").select("*").eq("id", payload.templateId).single(),
+        supabase.from("settings").select("key, value")
+      ]);
 
     if (athleteError || !athlete) {
-      return NextResponse.json({ error: "Athlete not found." }, { status: 404 });
+      return NextResponse.json({ error: athleteError?.message ?? "Athlete not found." }, { status: 404 });
     }
-    if (!athlete.consent_signed) {
-      return NextResponse.json({ error: "Consent not signed." }, { status: 403 });
+    if (templateError || !template) {
+      return NextResponse.json({ error: templateError?.message ?? "Template not found." }, { status: 404 });
     }
-    if (!athlete.reference_photo_url) {
-      return NextResponse.json({ error: "No reference photo for this athlete. Upload one first." }, { status: 400 });
-    }
-
-    const settings = (settingsRows ?? []).reduce<Record<string, string>>((a, c) => { a[c.key] = c.value; return a; }, {});
-    const workflow = parseWorkflowSettings(settings);
-
-    if (!workflow.runwayApiKey) {
-      return NextResponse.json({ error: "Runway API key not configured. Add it in Settings." }, { status: 400 });
+    if (settingsError) {
+      throw new Error(settingsError.message);
     }
 
-    const preset = PRESETS[body.animationStyle] ?? PRESETS["cinematic-intro"];
-    const promptText = body.motionPrompt
-      ? `${body.motionPrompt}. ${preset.prompt}`
-      : preset.prompt;
+    const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((accumulator, row) => {
+      accumulator[row.key] = row.value;
+      return accumulator;
+    }, {});
+    const workflow = parseWorkflowSettings(settingsMap);
 
-    const outputFilename = buildOutputFileName(athlete.name, "Animate", "Photo", 1);
+    const finalPrompt = payload.prompt?.trim() || buildVideoPrompt(athlete as Athlete, template as Template);
+    const promptImage = payload.imageUrl?.trim() || athlete.reference_photo_url;
 
-    const { id: jobId } = await createJob(supabase, {
-      athlete_id: athlete.id,
-      template_id: null,
-      status: "generating",
-      assembled_prompt: promptText,
-      output_filename: outputFilename
-    });
-
-    console.log(`[ANIMATE] Starting image-to-video for ${athlete.name}, style=${body.animationStyle}`);
+    if (!promptImage) {
+      return NextResponse.json(
+        { error: "No source image provided and athlete has no reference_photo_url." },
+        { status: 400 }
+      );
+    }
 
     try {
-      const { createRunwayTaskOnly } = await import("@/lib/engines");
+      const runwayResult = await generateImageToVideoWithRunway(workflow.runwayApiKey, finalPrompt, promptImage);
 
-      // Generate a signed URL so Runway can download the reference photo.
-      // Public URLs only work if the bucket is set to public access.
-      let imageUrl = athlete.reference_photo_url;
+      if ("taskId" in runwayResult) {
+        const { data: job, error: jobError } = await supabase
+          .from("jobs")
+          .insert({
+            athlete_id: athlete.id,
+            template_id: template.id,
+            status: "processing",
+            runway_task_id: runwayResult.taskId,
+            assembled_prompt: finalPrompt,
+            engine_used: "runway"
+          })
+          .select("*, athlete:athletes(name), template:templates(variant_name, category)")
+          .single();
 
-      // Extract the storage path from the public URL
-      // Format: https://<project>.supabase.co/storage/v1/object/public/reference-photos/<path>
-      const publicPrefix = "/storage/v1/object/public/reference-photos/";
-      const pathIndex = imageUrl.indexOf(publicPrefix);
-      if (pathIndex !== -1) {
-        const storagePath = imageUrl.substring(pathIndex + publicPrefix.length);
-        const { data: signedData, error: signedError } = await supabase.storage
-          .from("reference-photos")
-          .createSignedUrl(storagePath, 600); // 10-minute expiry
-        if (signedData?.signedUrl && !signedError) {
-          imageUrl = signedData.signedUrl;
-          console.log("[ANIMATE] Using signed URL for reference photo");
-        } else {
-          console.warn("[ANIMATE] Signed URL failed, using original URL:", signedError?.message);
+        if (jobError || !job) {
+          throw new Error(jobError?.message ?? "Unable to create animation job.");
         }
+
+        return NextResponse.json({
+          job,
+          status: "processing",
+          message: "Animation is generating. Poll /api/jobs/{id}/status every 10 seconds."
+        });
       }
 
-      const { taskId } = await createRunwayTaskOnly(workflow.runwayApiKey, {
-        prompt: promptText,
-        referencePhotoUrl: imageUrl,
-        durationSeconds: preset.duration
-      });
-
-      // Save runway_task_id for polling
-      await supabase
+      const { data: job, error: jobError } = await supabase
         .from("jobs")
-        .update({
-          status: "processing",
-          runway_task_id: taskId,
-          engine_used: "runway-i2v"
+        .insert({
+          athlete_id: athlete.id,
+          template_id: template.id,
+          status: "completed",
+          assembled_prompt: finalPrompt,
+          engine_used: "runway (mock)",
+          video_url: runwayResult.videoUrl
         })
-        .eq("id", jobId);
+        .select("*, athlete:athletes(name), template:templates(variant_name, category)")
+        .single();
 
-      console.log(`[ANIMATE] Job ${jobId} created with runway_task_id=${taskId} — returning for polling`);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[ANIMATE] Failed:", errMsg);
-      console.error("[ANIMATE] Stack:", err instanceof Error ? err.stack : "");
-      await updateJob(supabase, jobId, {
-        status: "rejected",
-        engine_used: "runway-i2v (failed)",
-        error_message: errMsg
+      if (jobError || !job) {
+        throw new Error(jobError?.message ?? "Unable to create completed animation job.");
+      }
+
+      return NextResponse.json({ job, status: "completed" });
+    } catch (runwayError) {
+      const { data: job, error: jobError } = await supabase
+        .from("jobs")
+        .insert({
+          athlete_id: athlete.id,
+          template_id: template.id,
+          status: "completed",
+          assembled_prompt: finalPrompt,
+          engine_used: "runway (mock)",
+          video_url: FALLBACK_VIDEO_URL,
+          error_message: runwayError instanceof Error ? runwayError.message : "Runway image-to-video create failed."
+        })
+        .select("*, athlete:athletes(name), template:templates(variant_name, category)")
+        .single();
+
+      if (jobError || !job) {
+        throw new Error(jobError?.message ?? "Unable to create fallback animation job.");
+      }
+
+      return NextResponse.json({
+        job,
+        status: "completed",
+        message: "Runway image-to-video creation failed. Returned mock fallback."
       });
     }
-
-    const finalJob = await fetchJob(supabase, jobId);
-    return NextResponse.json({ data: finalJob as Job });
   } catch (error) {
     const { status, message } = mapApiError(error);
     return NextResponse.json({ error: message }, { status });

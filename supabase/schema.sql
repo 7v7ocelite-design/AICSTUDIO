@@ -26,8 +26,7 @@ create table if not exists templates (
   audio_track text,
   content_tier text not null check (content_tier in ('standard', 'premium', 'social')),
   platforms text,
-  created_at timestamp with time zone default now(),
-  unique (category, variant_name)
+  created_at timestamp with time zone default now()
 );
 
 create table if not exists jobs (
@@ -35,18 +34,29 @@ create table if not exists jobs (
   athlete_id uuid references athletes(id) on delete cascade,
   template_id uuid references templates(id) on delete cascade,
   status text not null default 'queued'
-    check (status in ('queued', 'processing', 'generating', 'scoring', 'completed', 'needs_review', 'approved', 'rejected', 'failed')),
+    check (
+      status in (
+        'queued',
+        'generating',
+        'processing',
+        'scoring',
+        'needs_review',
+        'approved',
+        'rejected',
+        'completed',
+        'failed'
+      )
+    ),
   assembled_prompt text,
   face_score float,
   video_url text,
   engine_used text,
   file_name text,
-  output_filename text,
+  runway_task_id text,
+  error_message text,
   retry_count integer default 0,
   created_at timestamp with time zone default now(),
-  reviewed_at timestamp with time zone,
-  runway_task_id text,
-  error_message text
+  reviewed_at timestamp with time zone
 );
 
 create table if not exists settings (
@@ -66,3 +76,22 @@ values
   ('anthropic_api_key', ''),
   ('n8n_webhook_url', '')
 on conflict (key) do nothing;
+
+alter table jobs add column if not exists runway_task_id text;
+alter table jobs add column if not exists error_message text;
+
+alter table jobs drop constraint if exists jobs_status_check;
+alter table jobs
+add constraint jobs_status_check check (
+  status in (
+    'queued',
+    'generating',
+    'processing',
+    'scoring',
+    'needs_review',
+    'approved',
+    'rejected',
+    'completed',
+    'failed'
+  )
+);
