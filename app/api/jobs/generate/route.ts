@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     // Create the Runway task (returns immediately, no polling).
     const runway = await createRunwayTaskOnly(runwayKey, {
       prompt: assembledPrompt,
-      referencePhotoUrl: null // Generate always uses text_to_video; image_to_video is for /animate only.
+      referencePhotoUrl: athlete.reference_photo_url
     });
 
     if (!runway.taskId || runway.taskId === "00000000-0000-0000-0000-000000000000") {
