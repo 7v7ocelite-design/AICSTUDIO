@@ -96,12 +96,12 @@ export async function GET(
           return NextResponse.json({ ...job, status: "failed", error_message: errMsg });
         }
 
-        // Still running — return current status as-is.
+        // Still running — return current status with Runway debug data
         if (runwayStatus === "RUNNING" || runwayStatus === "THROTTLED") {
-          return NextResponse.json(job);
+          return NextResponse.json({ ...job, _runway: pollData });
         }
 
-        return NextResponse.json(job);
+        return NextResponse.json({ ...job, _runway: pollData, _unknownStatus: runwayStatus });
       } catch (err) {
         const message = err instanceof Error ? err.message : "unknown";
         console.error("[STATUS] Runway poll error:", message);
