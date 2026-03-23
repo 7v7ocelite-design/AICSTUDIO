@@ -99,7 +99,8 @@ export async function POST(request: NextRequest) {
       countQuery.is("template_id", null);
     }
     const { count: existingCount } = await countQuery;
-    const outputFilename = buildOutputFileName(athlete.name, `${category}-${location}`, existingCount ?? 0);
+    const version = (existingCount ?? 0) + 1;
+    const outputFilename = buildOutputFileName(athlete.name, category, location, version);
 
     // Dry run mode — validate everything without calling Runway.
     if (payload.dryRun) {

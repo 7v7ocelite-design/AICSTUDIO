@@ -50,6 +50,7 @@ export interface Job {
   video_url: string | null;
   engine_used: string | null;
   file_name: string | null;
+  output_filename?: string | null;
   runway_task_id?: string | null;
   error_message?: string | null;
   retry_count: number;
