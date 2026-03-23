@@ -8,6 +8,8 @@ import { getAdminSupabase } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+const STALE_MINUTES = 15;
+
 const terminalStatuses = new Set([
   "approved",
   "rejected",
@@ -37,6 +39,23 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
     if (job.status !== "processing" || !job.runway_task_id) {
       return NextResponse.json(job);
+    }
+
+    // Stale job timeout — auto-fail after STALE_MINUTES
+    const createdAt = new Date(job.created_at).getTime();
+    const elapsed = Date.now() - createdAt;
+    if (elapsed > STALE_MINUTES * 60 * 1000) {
+      const errorMessage = `Generation timed out after ${STALE_MINUTES} minutes.`;
+      await supabase
+        .from("jobs")
+        .update({ status: "failed", error_message: errorMessage })
+        .eq("id", params.id);
+
+      return NextResponse.json({
+        ...job,
+        status: "failed",
+        error_message: errorMessage
+      });
     }
 
     const { data: settings, error: settingsError } = await supabase
@@ -104,10 +123,13 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
         runway_status: runwayStatus,
         progress: typeof runwayData.progress === "number" ? runwayData.progress : null
       });
-    } catch {
+    } catch (pollError) {
+      console.error("[STATUS] Runway poll error:", pollError);
       return NextResponse.json({
         ...job,
-        status: "processing"
+        status: "processing",
+        runway_status: "POLL_ERROR",
+        error_message: pollError instanceof Error ? pollError.message : "Runway poll failed"
       });
     }
   } catch (error) {
