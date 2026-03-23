@@ -145,9 +145,11 @@ export async function POST(request: NextRequest) {
     // Create the Runway task (takes <5 seconds)
     try {
       const { createRunwayTaskOnly } = await import("@/lib/engines");
+      // Generate route always uses text_to_video (gen4.5).
+      // Image-to-video with athlete photos is handled by /api/jobs/animate.
       const { taskId } = await createRunwayTaskOnly(apiKeys.runway, {
         prompt: finalPrompt,
-        referencePhotoUrl: athlete.reference_photo_url
+        referencePhotoUrl: null
       });
 
       // Save job with processing status + runway task ID

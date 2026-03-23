@@ -18,6 +18,7 @@ interface UpdateJobParams {
   file_name?: string | null;
   retry_count?: number;
   reviewed_at?: string | null;
+  error_message?: string | null;
 }
 
 const JOB_SELECT = "*, athlete:athletes(name), template:templates(variant_name, category, location)";
@@ -64,22 +65,24 @@ export const updateJob = async (
   jobId: string,
   params: UpdateJobParams
 ): Promise<void> => {
-  // Try RPC first
-  try {
-    const { error: rpcError } = await supabase.rpc("update_job", {
-      p_id: jobId,
-      p_status: params.status ?? null,
-      p_face_score: params.face_score ?? null,
-      p_video_url: params.video_url ?? null,
-      p_engine_used: params.engine_used ?? null,
-      p_file_name: params.file_name ?? null,
-      p_retry_count: params.retry_count ?? null,
-      p_reviewed_at: params.reviewed_at ?? null
-    });
+  if (params.error_message === undefined) {
+    // Try RPC first
+    try {
+      const { error: rpcError } = await supabase.rpc("update_job", {
+        p_id: jobId,
+        p_status: params.status ?? null,
+        p_face_score: params.face_score ?? null,
+        p_video_url: params.video_url ?? null,
+        p_engine_used: params.engine_used ?? null,
+        p_file_name: params.file_name ?? null,
+        p_retry_count: params.retry_count ?? null,
+        p_reviewed_at: params.reviewed_at ?? null
+      });
 
-    if (!rpcError) return;
-  } catch {
-    // RPC not available — try fallback
+      if (!rpcError) return;
+    } catch {
+      // RPC not available — try fallback
+    }
   }
 
   // Fallback: update only safe columns (status, face_score, video_url, engine_used are in original schema)
@@ -88,6 +91,7 @@ export const updateJob = async (
   if (params.face_score !== undefined) updates.face_score = params.face_score;
   if (params.video_url !== undefined) updates.video_url = params.video_url;
   if (params.engine_used !== undefined) updates.engine_used = params.engine_used;
+  if (params.error_message !== undefined) updates.error_message = params.error_message;
 
   if (Object.keys(updates).length > 0) {
     const { error } = await supabase.from("jobs").update(updates).eq("id", jobId);

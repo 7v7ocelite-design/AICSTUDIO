@@ -79,9 +79,31 @@ export async function POST(request: NextRequest) {
 
     try {
       const { createRunwayTaskOnly } = await import("@/lib/engines");
+
+      // Generate a signed URL so Runway can download the reference photo.
+      // Public URLs only work if the bucket is set to public access.
+      let imageUrl = athlete.reference_photo_url;
+
+      // Extract the storage path from the public URL
+      // Format: https://<project>.supabase.co/storage/v1/object/public/reference-photos/<path>
+      const publicPrefix = "/storage/v1/object/public/reference-photos/";
+      const pathIndex = imageUrl.indexOf(publicPrefix);
+      if (pathIndex !== -1) {
+        const storagePath = imageUrl.substring(pathIndex + publicPrefix.length);
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from("reference-photos")
+          .createSignedUrl(storagePath, 600); // 10-minute expiry
+        if (signedData?.signedUrl && !signedError) {
+          imageUrl = signedData.signedUrl;
+          console.log("[ANIMATE] Using signed URL for reference photo");
+        } else {
+          console.warn("[ANIMATE] Signed URL failed, using original URL:", signedError?.message);
+        }
+      }
+
       const { taskId } = await createRunwayTaskOnly(workflow.runwayApiKey, {
         prompt: promptText,
-        referencePhotoUrl: athlete.reference_photo_url,
+        referencePhotoUrl: imageUrl,
         durationSeconds: preset.duration
       });
 
@@ -97,10 +119,13 @@ export async function POST(request: NextRequest) {
 
       console.log(`[ANIMATE] Job ${jobId} created with runway_task_id=${taskId} — returning for polling`);
     } catch (err) {
-      console.error("[ANIMATE] Failed:", err instanceof Error ? err.message : err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[ANIMATE] Failed:", errMsg);
+      console.error("[ANIMATE] Stack:", err instanceof Error ? err.stack : "");
       await updateJob(supabase, jobId, {
         status: "rejected",
-        engine_used: "runway-i2v (failed)"
+        engine_used: "runway-i2v (failed)",
+        error_message: errMsg
       });
     }
 
