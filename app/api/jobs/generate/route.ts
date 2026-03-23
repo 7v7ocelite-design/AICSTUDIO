@@ -144,15 +144,18 @@ export async function POST(request: NextRequest) {
 
     // Create the Runway task (takes <5 seconds)
     try {
+      console.log("[GENERATE] Step 1: Importing engines...");
       const { createRunwayTaskOnly } = await import("@/lib/engines");
-      // Generate route always uses text_to_video (gen4.5).
-      // Image-to-video with athlete photos is handled by /api/jobs/animate.
+      
+      console.log("[GENERATE] Step 2: Creating Runway task...");
+      console.log("[GENERATE] API key present:", !!apiKeys.runway, "Prompt length:", finalPrompt.length);
       const { taskId } = await createRunwayTaskOnly(apiKeys.runway, {
         prompt: finalPrompt,
         referencePhotoUrl: null
       });
+      console.log("[GENERATE] Step 3: Runway task created:", taskId);
 
-      // Save job with processing status + runway task ID
+      console.log("[GENERATE] Step 4: Creating job in DB...");
       const { id: jobId } = await createJob(supabase, {
         athlete_id: athlete.id,
         template_id: template?.id ?? null,
@@ -161,16 +164,20 @@ export async function POST(request: NextRequest) {
         output_filename: outputFilename,
         retry_count: 0
       });
+      console.log("[GENERATE] Step 5: Job created:", jobId);
 
-      // Save the runway_task_id
-      await supabase
+      console.log("[GENERATE] Step 6: Saving runway_task_id...");
+      const { error: updateError } = await supabase
         .from("jobs")
         .update({ runway_task_id: taskId, engine_used: "runway" })
         .eq("id", jobId);
-
-      console.log(`[GENERATE] Job ${jobId} created with runway_task_id=${taskId} — returning immediately`);
+      if (updateError) {
+        console.error("[GENERATE] Step 6 FAILED:", updateError.message);
+      }
+      console.log("[GENERATE] Step 7: Fetching final job...");
 
       const finalJob = await fetchJob(supabase, jobId);
+      console.log("[GENERATE] Step 8: SUCCESS — returning with polling=true");
       return NextResponse.json({
         data: finalJob as Job,
         polling: true,
@@ -178,8 +185,9 @@ export async function POST(request: NextRequest) {
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[GENERATE] Runway task creation failed:", errMsg);
-      console.error("[GENERATE] Full error:", JSON.stringify(err, Object.getOwnPropertyNames(err instanceof Error ? err : {}), 2));
+      const errStack = err instanceof Error ? err.stack : "";
+      console.error("[GENERATE] CATCH BLOCK HIT:", errMsg);
+      console.error("[GENERATE] Stack:", errStack);
 
       // Fallback to mock
       const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
