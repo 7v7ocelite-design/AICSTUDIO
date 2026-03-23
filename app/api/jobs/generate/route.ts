@@ -107,15 +107,22 @@ export async function POST(request: NextRequest) {
     if (selectedEngine === "runway") {
       try {
         const runwayResult = await generateWithRunway(workflow.runwayApiKey, assembledPrompt);
+        console.log("[GENERATE] Runway result:", JSON.stringify(runwayResult));
 
         if ("taskId" in runwayResult) {
+          const runwayTaskId = runwayResult.taskId;
+          if (!runwayTaskId || runwayTaskId === "00000000-0000-0000-0000-000000000000") {
+            console.error("[GENERATE] Invalid runway task ID!", runwayTaskId);
+            throw new Error(`Invalid Runway task ID returned: ${runwayTaskId ?? "missing"}`);
+          }
+
           const { data: job, error: jobError } = await supabase
             .from("jobs")
             .insert({
               athlete_id: athlete.id,
               template_id: template.id,
               status: "processing",
-              runway_task_id: runwayResult.taskId,
+              runway_task_id: runwayTaskId,
               assembled_prompt: assembledPrompt,
               engine_used: "runway"
             })

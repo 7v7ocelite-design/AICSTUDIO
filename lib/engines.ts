@@ -27,6 +27,31 @@ export interface RunwayTaskPollResult {
   [key: string]: unknown;
 }
 
+interface RunwayTaskCreateResponse {
+  id?: string;
+  taskId?: string;
+  status?: string;
+  error?: string;
+  message?: string;
+  failure?: string;
+  failureCode?: string;
+  task?: {
+    id?: string;
+    taskId?: string;
+    status?: string;
+  };
+  [key: string]: unknown;
+}
+
+const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+
+const extractRunwayTaskId = (data: RunwayTaskCreateResponse): string | null => {
+  const fromRoot = data.id ?? data.taskId;
+  const fromTask = data.task?.id ?? data.task?.taskId;
+  const taskId = fromRoot ?? fromTask;
+  return typeof taskId === "string" && taskId.length > 0 ? taskId : null;
+};
+
 const readVideoUrl = (data: Record<string, unknown>): string | null => {
   const candidates = ["video_url", "videoUrl", "url", "output_url", "result_url"];
   for (const key of candidates) {
@@ -111,19 +136,24 @@ export const generateWithRunway = async (
     })
   });
 
-  const created = (await createRes.json()) as Record<string, unknown>;
+  const data = (await createRes.json()) as RunwayTaskCreateResponse;
+  console.log("[RUNWAY] Full create response:", JSON.stringify(data));
+  const taskId = extractRunwayTaskId(data);
 
-  if (!createRes.ok || typeof created.id !== "string") {
+  if (!createRes.ok || !taskId || taskId === ZERO_UUID) {
     throw new Error(
       `Runway create failed: ${
-        (typeof created.error === "string" && created.error) ||
-        (typeof created.message === "string" && created.message) ||
+        (typeof data.error === "string" && data.error) ||
+        (typeof data.message === "string" && data.message) ||
+        (typeof data.failure === "string" && data.failure) ||
+        (typeof data.failureCode === "string" && data.failureCode) ||
+        (taskId === ZERO_UUID ? "Invalid zero UUID task ID" : "") ||
         "Unknown error"
       }`
     );
   }
 
-  return { taskId: created.id };
+  return { taskId };
 };
 
 export const generateImageToVideoWithRunway = async (
@@ -151,19 +181,24 @@ export const generateImageToVideoWithRunway = async (
     })
   });
 
-  const created = (await createRes.json()) as Record<string, unknown>;
+  const data = (await createRes.json()) as RunwayTaskCreateResponse;
+  console.log("[RUNWAY] Full create response:", JSON.stringify(data));
+  const taskId = extractRunwayTaskId(data);
 
-  if (!createRes.ok || typeof created.id !== "string") {
+  if (!createRes.ok || !taskId || taskId === ZERO_UUID) {
     throw new Error(
       `Runway image_to_video create failed: ${
-        (typeof created.error === "string" && created.error) ||
-        (typeof created.message === "string" && created.message) ||
+        (typeof data.error === "string" && data.error) ||
+        (typeof data.message === "string" && data.message) ||
+        (typeof data.failure === "string" && data.failure) ||
+        (typeof data.failureCode === "string" && data.failureCode) ||
+        (taskId === ZERO_UUID ? "Invalid zero UUID task ID" : "") ||
         "Unknown error"
       }`
     );
   }
 
-  return { taskId: created.id };
+  return { taskId };
 };
 
 export const pollRunwayTask = async (apiKey: string, taskId: string): Promise<RunwayTaskPollResult> => {
