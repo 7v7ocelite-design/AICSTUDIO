@@ -3,7 +3,7 @@ import type { Job } from "@/lib/types";
 
 interface CreateJobParams {
   athlete_id: string;
-  template_id: string;
+  template_id: string | null;
   status?: string;
   assembled_prompt?: string | null;
   output_filename?: string | null;
