@@ -17,6 +17,7 @@ interface GenerateBody {
   custom_prompt?: string;
   duration?: number;
   ratio?: string;
+  dryRun?: boolean;
 }
 
 export async function POST(request: NextRequest) {
@@ -132,6 +133,17 @@ export async function POST(request: NextRequest) {
 
     console.log(`[GENERATE] Runway key: ${runwayKey ? "SET" : "NOT SET"} (source: ${keySource.join(",") || "none"})`);
     console.log(`[GENERATE] Settings keys in DB: ${JSON.stringify(Object.keys(settingsMap))}`);
+
+    // Dry run mode: validate full pipeline setup without spending Runway credits.
+    if (payload.dryRun) {
+      return NextResponse.json({
+        dryRun: true,
+        prompt: finalPrompt,
+        athleteName: athlete.name,
+        templateName: template?.variant_name ?? "Custom Prompt",
+        hasApiKey: Boolean(runwayKey)
+      });
+    }
 
     if (!runwayKey) {
       // No Runway key anywhere — create mock job
