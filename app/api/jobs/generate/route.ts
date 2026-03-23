@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       });
 
       const finalJob = await fetchJob(supabase, jobId);
-      return NextResponse.json({ data: finalJob as Job });
+      return NextResponse.json({ data: finalJob as Job, _debugError: errMsg, _debugStack: errStack });
     }
 
     // Create the Runway task (takes <5 seconds)
