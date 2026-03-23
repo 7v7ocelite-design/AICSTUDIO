@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Job } from "@/lib/types";
+import { ProgressRing } from "@/components/progress-ring";
 
 type QueueTab = "all" | "approval" | "review";
 
@@ -33,6 +34,7 @@ const scoreColor = (score: number | null) => {
 
 const statusClass: Record<string, string> = {
   queued: "bg-slate-700 text-slate-200",
+  processing: "bg-blue-900 text-blue-200",
   generating: "bg-blue-900 text-blue-200",
   scoring: "bg-amber-900 text-amber-200",
   needs_review: "bg-purple-900 text-purple-200",
@@ -61,6 +63,8 @@ export const JobQueues = ({
   const [activeTab, setActiveTab] = useState<QueueTab>(initialTab ?? "all");
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [creatingMock, setCreatingMock] = useState(false);
+  const [jobProgress, setJobProgress] = useState<Record<string, { progress: number; elapsed: number }>>({});
+  const pollIntervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
   const autoApprove = Number(settings.auto_approve_threshold) || 90;
   const reviewThreshold = Number(settings.review_threshold) || 85;
@@ -121,6 +125,108 @@ export const JobQueues = ({
       setCreatingMock(false);
     }
   };
+
+  useEffect(() => {
+    const processingJobs = jobs.filter((j) => j.status === "processing");
+    const currentIntervals = pollIntervalsRef.current;
+    const processingIds = new Set(processingJobs.map((job) => job.id));
+
+    // Start polling for new processing jobs
+    for (const job of processingJobs) {
+      if (currentIntervals[job.id]) continue; // already polling
+
+      setJobProgress((prev) => ({
+        ...prev,
+        [job.id]: prev[job.id] ?? { progress: 0, elapsed: 0 }
+      }));
+
+      const interval = setInterval(async () => {
+        setJobProgress((prev) => {
+          const current = prev[job.id] ?? { progress: 0, elapsed: 0 };
+          const estimatedProgress = Math.min(95, (current.elapsed / 180) * 100);
+          return {
+            ...prev,
+            [job.id]: {
+              ...current,
+              progress: current.progress > estimatedProgress ? current.progress : estimatedProgress
+            }
+          };
+        });
+
+        try {
+          const res = await fetch(`/api/jobs/${job.id}/status`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          if (!res.ok) return;
+
+          const data = (await res.json()) as Job & { progress?: number | null };
+
+          if (data.progress !== null && data.progress !== undefined) {
+            const normalizedProgress = data.progress <= 1 ? data.progress * 100 : data.progress;
+            const clampedProgress = Math.max(0, Math.min(100, normalizedProgress));
+            setJobProgress((prev) => ({
+              ...prev,
+              [job.id]: {
+                ...(prev[job.id] ?? { progress: 0, elapsed: 0 }),
+                progress: clampedProgress
+              }
+            }));
+          }
+
+          if (data.status === "completed" || data.status === "failed") {
+            clearInterval(currentIntervals[job.id]);
+            delete currentIntervals[job.id];
+            onJobUpdate(data);
+            setJobProgress((prev) => {
+              const next = { ...prev };
+              delete next[job.id];
+              return next;
+            });
+          }
+        } catch {
+          // Network error — keep trying
+        }
+      }, 10000);
+
+      currentIntervals[job.id] = interval;
+    }
+
+    // Clean up intervals for jobs no longer processing
+    for (const jobId of Object.keys(currentIntervals)) {
+      if (!processingIds.has(jobId)) {
+        clearInterval(currentIntervals[jobId]);
+        delete currentIntervals[jobId];
+        setJobProgress((prev) => {
+          const next = { ...prev };
+          delete next[jobId];
+          return next;
+        });
+      }
+    }
+  }, [accessToken, jobs, onJobUpdate]);
+
+  useEffect(() => {
+    const tick = setInterval(() => {
+      setJobProgress((prev) => {
+        const next = { ...prev };
+        for (const id of Object.keys(next)) {
+          next[id] = { ...next[id], elapsed: next[id].elapsed + 1 };
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      for (const id of Object.keys(pollIntervalsRef.current)) {
+        clearInterval(pollIntervalsRef.current[id]);
+      }
+      pollIntervalsRef.current = {};
+    };
+  }, []);
 
   const visibleJobs =
     activeTab === "approval"
@@ -205,9 +311,18 @@ export const JobQueues = ({
                     {job.face_score.toFixed(1)}
                   </span>
                 )}
-                <span className={`rounded-full px-2 py-0.5 text-[10px] ${statusClass[job.status] ?? "bg-slate-700"}`}>
-                  {job.status}
-                </span>
+                {job.status === "processing" ? (
+                  <ProgressRing
+                    progress={jobProgress[job.id]?.progress ?? 0}
+                    elapsedSeconds={jobProgress[job.id]?.elapsed ?? 0}
+                    size={44}
+                    strokeWidth={3}
+                  />
+                ) : (
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${statusClass[job.status] ?? "bg-slate-700"}`}>
+                    {job.status}
+                  </span>
+                )}
               </div>
             </div>
             <p className="mt-1 text-xs">

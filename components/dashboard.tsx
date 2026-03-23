@@ -20,7 +20,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
   const [selectedAthlete, setSelectedAthlete] = useState<string>("");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [generationStatus, setGenerationStatus] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAthleteForm, setShowAthleteForm] = useState(false);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
@@ -75,7 +74,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
     setIsGenerating(true);
     setError(null);
     setNotice(null);
-    setGenerationStatus("Starting generation...");
 
     try {
       const response = await fetch("/api/jobs/generate", {
@@ -87,7 +85,7 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
         body: JSON.stringify({ athleteId: aId, templateId: tId })
       });
 
-      const payload = (await response.json()) as { data?: Job; polling?: boolean; error?: string };
+      const payload = (await response.json()) as { data?: Job; polling?: boolean; message?: string; error?: string };
       if (!response.ok || !payload.data) {
         throw new Error(payload.error ?? "Unable to generate video.");
       }
@@ -100,67 +98,16 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
       );
 
       if (payload.polling && payload.data.id) {
-        // Background polling mode — video is generating on Runway
-        setGenerationStatus("Generating video with Runway... (2-4 minutes)");
-        await pollForCompletion(payload.data.id);
+        // JobQueues owns processing-job polling and progress display.
+        setTimedNotice(payload.message ?? "Generation started. Check job progress in the queue.");
       } else {
         setTimedNotice(`Generation completed: ${payload.data.status}.`);
-        setIsGenerating(false);
-        setGenerationStatus(null);
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Generation failed.");
+    } finally {
       setIsGenerating(false);
-      setGenerationStatus(null);
     }
-  };
-
-  const pollForCompletion = async (jobId: string) => {
-    const maxPolls = 60; // 60 x 10s = 10 minutes max
-
-    for (let i = 0; i < maxPolls; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 10000));
-
-      try {
-        const res = await fetch(`/api/jobs/${jobId}/status`);
-        const job = await res.json();
-
-        if (job.status === "completed") {
-          // Update the job in our local state
-          setData((current) =>
-            current
-              ? { ...current, jobs: current.jobs.map((j) => (j.id === jobId ? { ...j, ...job } : j)) }
-              : current
-          );
-          setTimedNotice("Video ready!");
-          setIsGenerating(false);
-          setGenerationStatus(null);
-          return;
-        }
-
-        if (job.status === "failed") {
-          setData((current) =>
-            current
-              ? { ...current, jobs: current.jobs.map((j) => (j.id === jobId ? { ...j, ...job } : j)) }
-              : current
-          );
-          setError(`Generation failed: ${job.error_message || "Unknown error"}`);
-          setIsGenerating(false);
-          setGenerationStatus(null);
-          return;
-        }
-
-        // Still processing
-        const elapsed = (i + 1) * 10;
-        setGenerationStatus(`Generating with Runway... (${elapsed}s elapsed)`);
-      } catch {
-        // Network error — keep trying
-      }
-    }
-
-    setError("Timed out waiting for Runway. Check the job queue.");
-    setIsGenerating(false);
-    setGenerationStatus(null);
   };
 
   const handleJobUpdate = (updatedJob: Job) => {
@@ -398,10 +345,6 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
           >
             {isGenerating ? "Generating..." : "Generate Finished Video"}
           </button>
-
-          {generationStatus && (
-            <p className="text-sm text-blue-400 animate-pulse">{generationStatus}</p>
-          )}
 
           {consentMissing && (
             <p className="rounded-lg border border-amber-700 bg-amber-950/60 px-3 py-2 text-sm text-amber-300">
