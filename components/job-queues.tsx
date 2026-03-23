@@ -63,7 +63,9 @@ export const JobQueues = ({
   const [activeTab, setActiveTab] = useState<QueueTab>(initialTab ?? "all");
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [creatingMock, setCreatingMock] = useState(false);
-  const [jobProgress, setJobProgress] = useState<Record<string, { progress: number; elapsed: number }>>({});
+  const [jobProgress, setJobProgress] = useState<
+    Record<string, { progress: number; elapsed: number; runwayStatus: string | null; hasRealProgress: boolean }>
+  >({});
   const pollIntervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
   const autoApprove = Number(settings.auto_approve_threshold) || 90;
@@ -137,12 +139,18 @@ export const JobQueues = ({
 
       setJobProgress((prev) => ({
         ...prev,
-        [job.id]: prev[job.id] ?? { progress: 0, elapsed: 0 }
+        [job.id]: prev[job.id] ?? { progress: 0, elapsed: 0, runwayStatus: null, hasRealProgress: false }
       }));
 
       const interval = setInterval(async () => {
         setJobProgress((prev) => {
-          const current = prev[job.id] ?? { progress: 0, elapsed: 0 };
+          const current = prev[job.id] ?? { progress: 0, elapsed: 0, runwayStatus: null, hasRealProgress: false };
+
+          // Only estimate when the API is not returning either progress or runway status.
+          if (current.hasRealProgress || current.runwayStatus) {
+            return prev;
+          }
+
           const estimatedProgress = Math.min(95, (current.elapsed / 180) * 100);
           return {
             ...prev,
@@ -161,27 +169,8 @@ export const JobQueues = ({
 
           const data = (await res.json()) as Job & {
             progress?: number | null;
-            _runway?: { progress?: number | null };
+            runway_status?: string | null;
           };
-
-          const rawProgress =
-            typeof data.progress === "number"
-              ? data.progress
-              : typeof data._runway?.progress === "number"
-                ? data._runway.progress
-                : null;
-
-          if (rawProgress !== null) {
-            const normalizedProgress = rawProgress <= 1 ? Math.round(rawProgress * 100) : Math.round(rawProgress);
-            const clampedProgress = Math.max(0, Math.min(100, normalizedProgress));
-            setJobProgress((prev) => ({
-              ...prev,
-              [job.id]: {
-                ...(prev[job.id] ?? { progress: 0, elapsed: 0 }),
-                progress: clampedProgress
-              }
-            }));
-          }
 
           if (data.status === "completed" || data.status === "failed") {
             clearInterval(currentIntervals[job.id]);
@@ -192,7 +181,33 @@ export const JobQueues = ({
               delete next[job.id];
               return next;
             });
+            return;
           }
+
+          const rawProgress = typeof data.progress === "number" ? data.progress : null;
+          const runwayStatus = typeof data.runway_status === "string" ? data.runway_status : null;
+          setJobProgress((prev) => {
+            const current = prev[job.id] ?? { progress: 0, elapsed: 0, runwayStatus: null, hasRealProgress: false };
+            let nextProgress = current.progress;
+            let hasRealProgress = current.hasRealProgress;
+
+            if (rawProgress !== null) {
+              // Status endpoint returns progress as 0-1; convert to percentage for UI ring.
+              const progressPercent = Math.round(Math.max(0, Math.min(1, rawProgress)) * 100);
+              nextProgress = progressPercent;
+              hasRealProgress = true;
+            }
+
+            return {
+              ...prev,
+              [job.id]: {
+                ...current,
+                progress: nextProgress,
+                runwayStatus: runwayStatus ?? current.runwayStatus,
+                hasRealProgress
+              }
+            };
+          });
         } catch {
           // Network error — keep trying
         }
@@ -250,6 +265,22 @@ export const JobQueues = ({
     { id: "approval", label: "Approval Queue", count: approvalQueue.length },
     { id: "review", label: "Review Queue", count: reviewQueue.length }
   ];
+
+  const processingStatusText = (jobId: string): string | null => {
+    const state = jobProgress[jobId];
+    if (!state) return null;
+
+    if (state.hasRealProgress) {
+      const status = state.runwayStatus ?? "RUNNING";
+      return `Generating with Runway... (${state.elapsed}s elapsed · ${status} · ${Math.round(state.progress)}%)`;
+    }
+
+    if (state.runwayStatus) {
+      return `Generating with Runway... (${state.elapsed}s elapsed · ${state.runwayStatus})`;
+    }
+
+    return `Generating with Runway... (${state.elapsed}s elapsed)`;
+  };
 
   return (
     <div className="panel space-y-4">
@@ -341,6 +372,9 @@ export const JobQueues = ({
                 {job.engine_used ?? "n/a"}
               </span>
             </p>
+            {job.status === "processing" && processingStatusText(job.id) ? (
+              <p className="mt-1 text-xs text-blue-300">{processingStatusText(job.id)}</p>
+            ) : null}
             {job.output_filename && (
               <p className="text-xs font-mono text-slate-500 truncate" title={job.output_filename}>
                 📁 {job.output_filename}
