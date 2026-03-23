@@ -43,6 +43,33 @@ export const GenerateView = ({
     groupedTemplates.push({ category, items });
   }
 
+  const pollForCompletion = async (jobId: string) => {
+    const maxPolls = 60; // 60 x 10s = 10 minutes
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise((r) => setTimeout(r, 10000));
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/status`);
+        const job = await res.json();
+        if (job.status === "completed") {
+          onJobCreated(job as Job); // update with video_url
+          toast("Video ready!", "success");
+          return;
+        }
+        if (job.status === "failed") {
+          onJobCreated(job as Job);
+          toast(`Generation failed: ${job.error_message || "Unknown error"}`, "error");
+          return;
+        }
+        // Still processing — update toast
+        const elapsed = (i + 1) * 10;
+        toast(`Generating with Runway... (${elapsed}s elapsed)`, "info");
+      } catch {
+        // network error — keep trying
+      }
+    }
+    toast("Timed out waiting for video. Check job queue.", "error");
+  };
+
   const handleGenerate = async () => {
     if (!selectedAthlete || !selectedTemplate) { toast("Select both athlete and template.", "error"); return; }
     setGenerating(true);
@@ -54,8 +81,14 @@ export const GenerateView = ({
       });
       const payload = await res.json();
       if (!res.ok || !payload.data) throw new Error(payload.error ?? "Generation failed.");
-      toast(`Generation completed: ${payload.data.status}.`, "success");
       onJobCreated(payload.data as Job);
+
+      if (payload.polling && payload.data.id) {
+        toast("Video generating with Runway... (2-4 minutes)", "info");
+        await pollForCompletion(payload.data.id);
+      } else {
+        toast(`Generation completed: ${payload.data.status}.`, "success");
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Generation failed.", "error");
     } finally {

@@ -29,6 +29,32 @@ export const AnimatePhoto = ({ athletes, accessToken, onJobCreated }: AnimatePho
   const hasPhoto = !!athlete?.reference_photo_url;
   const consentMissing = athlete && !athlete.consent_signed;
 
+  const pollForCompletion = async (jobId: string) => {
+    const maxPolls = 60; // 60 x 10s = 10 minutes
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise((r) => setTimeout(r, 10000));
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/status`);
+        const job = await res.json();
+        if (job.status === "completed") {
+          onJobCreated(job as Job);
+          toast("Animation ready!", "success");
+          return;
+        }
+        if (job.status === "failed") {
+          onJobCreated(job as Job);
+          toast(`Animation failed: ${job.error_message || "Unknown error"}`, "error");
+          return;
+        }
+        const elapsed = (i + 1) * 10;
+        toast(`Animating with Runway... (${elapsed}s elapsed)`, "info");
+      } catch {
+        // Network error — keep trying
+      }
+    }
+    toast("Timed out waiting for animation. Check job queue.", "error");
+  };
+
   const handleAnimate = async () => {
     if (!selectedAthlete) { toast("Select an athlete.", "error"); return; }
     if (!hasPhoto) { toast("This athlete has no reference photo. Upload one first.", "error"); return; }
@@ -40,14 +66,19 @@ export const AnimatePhoto = ({ athletes, accessToken, onJobCreated }: AnimatePho
         body: JSON.stringify({ athleteId: selectedAthlete, animationStyle: selectedPreset, motionPrompt: motionPrompt.trim() || null })
       });
       const payload = await res.json();
-      if (res.ok && payload.data) {
-        toast(`Animation generated: ${payload.data.status}`, "success");
-        onJobCreated(payload.data as Job);
-      } else {
-        toast(payload.error ?? "Animation failed.", "error");
+      if (!res.ok || !payload.data) {
+        throw new Error(payload.error ?? "Animation failed.");
       }
-    } catch {
-      toast("Animation failed.", "error");
+      onJobCreated(payload.data as Job);
+
+      if (payload.polling || payload.data.status === "processing") {
+        toast("Animation generating with Runway... (2-4 minutes)", "info");
+        await pollForCompletion(payload.data.id);
+      } else {
+        toast(`Animation generated: ${payload.data.status}`, "success");
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Animation failed.", "error");
     } finally {
       setGenerating(false);
     }

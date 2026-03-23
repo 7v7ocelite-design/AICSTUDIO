@@ -56,7 +56,15 @@ const StudioInner = () => {
   }, [fetchBootstrap]);
 
   const handleJobCreated = (job: Job) => {
-    setData((prev) => prev ? { ...prev, jobs: [job, ...prev.jobs] } : prev);
+    setData((prev) => {
+      if (!prev) return prev;
+      // If job already exists, update it; otherwise prepend
+      const exists = prev.jobs.some((j) => j.id === job.id);
+      if (exists) {
+        return { ...prev, jobs: prev.jobs.map((j) => j.id === job.id ? job : j) };
+      }
+      return { ...prev, jobs: [job, ...prev.jobs] };
+    });
   };
 
   const handleJobUpdate = (updated: Job) => {
@@ -88,6 +96,32 @@ const StudioInner = () => {
     void fetchBootstrap();
   };
 
+  const pollForCompletion = async (jobId: string) => {
+    const maxPolls = 60; // 60 x 10s = 10 minutes
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise((r) => setTimeout(r, 10000));
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/status`);
+        const job = await res.json();
+        if (job.status === "completed") {
+          handleJobCreated(job as Job);
+          toast("Video ready!", "success");
+          return;
+        }
+        if (job.status === "failed") {
+          handleJobCreated(job as Job);
+          toast(`Generation failed: ${job.error_message || "Unknown error"}`, "error");
+          return;
+        }
+        const elapsed = (i + 1) * 10;
+        toast(`Generating with Runway... (${elapsed}s elapsed)`, "info");
+      } catch {
+        // network error — keep trying
+      }
+    }
+    toast("Timed out waiting for video. Check job queue.", "error");
+  };
+
   const handleRegenerate = (athleteId: string, templateId: string) => {
     void (async () => {
       try {
@@ -97,12 +131,19 @@ const StudioInner = () => {
           body: JSON.stringify({ athleteId, templateId })
         });
         const payload = await res.json();
-        if (res.ok && payload.data) {
-          handleJobCreated(payload.data as Job);
+        if (!res.ok || !payload.data) {
+          throw new Error(payload.error ?? "Re-generation failed.");
+        }
+        handleJobCreated(payload.data as Job);
+
+        if (payload.polling && payload.data.id) {
+          toast("Video generating with Runway... (2-4 minutes)", "info");
+          await pollForCompletion(payload.data.id);
+        } else {
           toast("Re-generation completed.", "success");
         }
-      } catch {
-        toast("Re-generation failed.", "error");
+      } catch (err) {
+        toast(err instanceof Error ? err.message : "Re-generation failed.", "error");
       }
     })();
   };
