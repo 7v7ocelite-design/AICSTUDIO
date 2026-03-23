@@ -5,6 +5,8 @@ export const FALLBACK_VIDEO_URL =
 
 export const RUNWAY_API_BASE = "https://api.dev.runwayml.com/v1";
 export const RUNWAY_VERSION = "2024-11-06";
+export const RUNWAY_BASE_URL = RUNWAY_API_BASE;
+export const RUNWAY_API_VERSION = RUNWAY_VERSION;
 
 export interface EngineResult {
   engine: "kling" | "runway" | "vidu";
@@ -233,4 +235,65 @@ export const generateWithEngine = async (
   }
 
   return callEngine(engine, "https://api.vidu.com/v1/video/generate", apiKeys.vidu, input);
+};
+
+const runwayHeaders = (apiKey: string) => ({
+  Authorization: `Bearer ${apiKey}`,
+  "Content-Type": "application/json",
+  "X-Runway-Version": RUNWAY_API_VERSION
+});
+
+/**
+ * Creates a Runway task and returns immediately WITHOUT polling.
+ * Used for async pattern where frontend polls via status route.
+ */
+export const createRunwayTaskOnly = async (
+  apiKey: string,
+  input: EngineInput
+): Promise<{ taskId: string; engine: string }> => {
+  const hasImage = input.referencePhotoUrl &&
+    input.referencePhotoUrl.startsWith("http");
+
+  const endpoint = hasImage
+    ? `${RUNWAY_BASE_URL}/image_to_video`
+    : `${RUNWAY_BASE_URL}/text_to_video`;
+
+  const model = hasImage ? "gen4_turbo" : "gen4.5";
+
+  const body: Record<string, unknown> = {
+    model,
+    promptText: input.prompt.slice(0, 1000),
+    duration: Math.min(input.durationSeconds ?? 10, 10),
+    ratio: "1280:720"
+  };
+
+  if (hasImage) {
+    body.promptImage = input.referencePhotoUrl;
+  }
+
+  console.log(`[RUNWAY] Creating task: ${endpoint} model=${model}`);
+
+  const createRes = await fetch(endpoint, {
+    method: "POST",
+    headers: runwayHeaders(apiKey),
+    body: JSON.stringify(body)
+  });
+
+  if (!createRes.ok) {
+    const errText = await createRes.text().catch(() => "");
+    throw new Error(`Runway create task failed: HTTP ${createRes.status} — ${errText}`);
+  }
+
+  const created = (await createRes.json()) as RunwayTaskCreateResponse;
+  console.log("[RUNWAY] Full create response:", JSON.stringify(created));
+  const taskId = extractRunwayTaskId(created);
+  if (!taskId) {
+    throw new Error("Runway create task returned no task ID");
+  }
+  if (taskId === ZERO_UUID) {
+    throw new Error("Runway create task returned invalid zero UUID task ID");
+  }
+
+  console.log(`[RUNWAY] Task created: ${taskId} — returning immediately (no poll)`);
+  return { taskId, engine: "runway" };
 };

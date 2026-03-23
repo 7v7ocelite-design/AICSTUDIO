@@ -1,209 +1,173 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { mapApiError, readJsonBody, requireAuthenticatedOperator } from "@/lib/api";
-import {
-  FALLBACK_VIDEO_URL,
-  generateWithEngine,
-  generateWithRunway,
-  pickEngineForTier
-} from "@/lib/engines";
+import { createRunwayTaskOnly } from "@/lib/engines";
 import { buildVideoPrompt } from "@/lib/prompt";
 import { getAdminSupabase } from "@/lib/supabase/admin";
-import type { Athlete, Job, Template } from "@/lib/types";
-import { parseWorkflowSettings } from "@/lib/workflow";
+import type { Athlete, Template } from "@/lib/types";
+import { buildOutputFileName, parseWorkflowSettings } from "@/lib/workflow";
 
-export const maxDuration = 30;
+export const maxDuration = 55; // Stay under Vercel Hobby 60s limit
 
 interface GenerateBody {
   athleteId: string;
-  templateId: string;
+  templateId?: string;
+  custom_prompt?: string;
+  dryRun?: boolean;
 }
-
-const uploadGeneratedVideo = async (sourceUrl: string, fileName: string): Promise<string> => {
-  try {
-    const supabase = getAdminSupabase();
-    const response = await fetch(sourceUrl);
-    if (!response.ok) {
-      return sourceUrl;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    const upload = await supabase.storage
-      .from("generated-videos")
-      .upload(`jobs/${fileName}`, Buffer.from(arrayBuffer), {
-        upsert: true,
-        contentType: response.headers.get("content-type") ?? "video/mp4"
-      });
-    if (upload.error) {
-      return sourceUrl;
-    }
-    const { data } = supabase.storage.from("generated-videos").getPublicUrl(`jobs/${fileName}`);
-    return data.publicUrl;
-  } catch {
-    return sourceUrl;
-  }
-};
 
 export async function POST(request: NextRequest) {
   try {
     await requireAuthenticatedOperator(request);
     const payload = await readJsonBody<GenerateBody>(request);
-    if (!payload.athleteId || !payload.templateId) {
-      return NextResponse.json({ error: "athleteId and templateId are required." }, { status: 400 });
+    if (!payload.athleteId) {
+      return NextResponse.json({ error: "athleteId is required." }, { status: 400 });
+    }
+    if (!payload.templateId && !payload.custom_prompt) {
+      return NextResponse.json({ error: "templateId or custom_prompt is required." }, { status: 400 });
     }
 
     const supabase = getAdminSupabase();
-    const [{ data: athlete, error: athleteError }, { data: template, error: templateError }, { data: settingsRows, error: settingsError }] =
+
+    const [{ data: athlete, error: athleteError }, { data: settingsRows, error: settingsError }] =
       await Promise.all([
         supabase.from("athletes").select("*").eq("id", payload.athleteId).single(),
-        supabase.from("templates").select("*").eq("id", payload.templateId).single(),
         supabase.from("settings").select("key, value")
       ]);
 
     if (athleteError || !athlete) {
       return NextResponse.json({ error: athleteError?.message ?? "Athlete not found." }, { status: 404 });
     }
-    if (templateError || !template) {
-      return NextResponse.json({ error: templateError?.message ?? "Template not found." }, { status: 404 });
+    if (!athlete.consent_signed) {
+      return NextResponse.json(
+        { error: "Cannot generate content — athlete has not signed a consent and usage release." },
+        { status: 403 }
+      );
     }
     if (settingsError) {
       throw new Error(settingsError.message);
     }
 
-    const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((accumulator, row) => {
-      accumulator[row.key] = row.value;
-      return accumulator;
+    let template: Record<string, unknown> | null = null;
+    if (payload.templateId) {
+      const { data: t, error: tErr } = await supabase
+        .from("templates")
+        .select("*")
+        .eq("id", payload.templateId)
+        .single();
+      if (tErr || !t) {
+        return NextResponse.json({ error: "Template not found." }, { status: 404 });
+      }
+      template = t;
+    }
+
+    const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((acc, row) => {
+      acc[row.key] = row.value;
+      return acc;
     }, {});
     const workflow = parseWorkflowSettings(settingsMap);
-    const assembledPrompt = buildVideoPrompt(athlete as Athlete, template as Template);
-    const selectedEngine = pickEngineForTier(template.content_tier, 0);
 
-    const createCompletedOrFailedJob = async (params: {
-      status: "completed" | "failed";
-      videoUrl?: string | null;
-      engineUsed: string;
-      errorMessage?: string | null;
-    }): Promise<Job> => {
-      const { data: createdJob, error: createError } = await supabase
-        .from("jobs")
-        .insert({
-          athlete_id: athlete.id,
-          template_id: template.id,
-          status: params.status,
-          assembled_prompt: assembledPrompt,
-          engine_used: params.engineUsed,
-          video_url: params.videoUrl ?? null,
-          error_message: params.errorMessage ?? null
-        })
-        .select("*, athlete:athletes(name), template:templates(variant_name, category)")
-        .single();
-
-      if (createError || !createdJob) {
-        throw new Error(createError?.message ?? "Unable to create job.");
-      }
-
-      return createdJob as Job;
-    };
-
-    if (selectedEngine === "runway") {
-      try {
-        const runwayResult = await generateWithRunway(workflow.runwayApiKey, assembledPrompt);
-        console.log("[GENERATE] Runway result:", JSON.stringify(runwayResult));
-
-        if ("taskId" in runwayResult) {
-          const runwayTaskId = runwayResult.taskId;
-          if (!runwayTaskId || runwayTaskId === "00000000-0000-0000-0000-000000000000") {
-            console.error("[GENERATE] Invalid runway task ID!", runwayTaskId);
-            throw new Error(`Invalid Runway task ID returned: ${runwayTaskId ?? "missing"}`);
-          }
-
-          const { data: job, error: jobError } = await supabase
-            .from("jobs")
-            .insert({
-              athlete_id: athlete.id,
-              template_id: template.id,
-              status: "processing",
-              runway_task_id: runwayTaskId,
-              assembled_prompt: assembledPrompt,
-              engine_used: "runway"
-            })
-            .select("*, athlete:athletes(name), template:templates(variant_name, category)")
-            .single();
-
-          if (jobError || !job) {
-            throw new Error(jobError?.message ?? "Unable to create processing job.");
-          }
-
-          return NextResponse.json({
-            job,
-            status: "processing",
-            message: "Video is generating. Poll /api/jobs/{id}/status every 10 seconds."
-          });
-        }
-
-        const persistedUrl = await uploadGeneratedVideo(runwayResult.videoUrl, `${crypto.randomUUID()}.mp4`);
-        const completedJob = await createCompletedOrFailedJob({
-          status: "completed",
-          videoUrl: persistedUrl,
-          engineUsed: "runway (mock)"
-        });
-
-        return NextResponse.json({
-          job: completedJob,
-          status: "completed"
-        });
-      } catch (runwayError) {
-        const completedJob = await createCompletedOrFailedJob({
-          status: "completed",
-          videoUrl: FALLBACK_VIDEO_URL,
-          engineUsed: "runway (mock)",
-          errorMessage: runwayError instanceof Error ? runwayError.message : "Runway create failed."
-        });
-
-        return NextResponse.json({
-          job: completedJob,
-          status: "completed",
-          message: "Runway task creation failed. Returned mock fallback."
-        });
-      }
-    }
-
-    try {
-      const generated = await generateWithEngine(
-        selectedEngine,
-        {
-          kling: workflow.klingApiKey,
-          vidu: workflow.viduApiKey
-        },
-        {
-          prompt: assembledPrompt,
-          referencePhotoUrl: athlete.reference_photo_url
-        }
+    // Resolve Runway API key with fallback chain.
+    let runwayKey = workflow.runwayApiKey || "";
+    if (!runwayKey) runwayKey = settingsMap.runway_api_key || "";
+    if (!runwayKey) {
+      return NextResponse.json(
+        { error: "No Runway API key configured. Add it in Settings.", code: "NO_KEY" },
+        { status: 400 }
       );
-      const persistedUrl = await uploadGeneratedVideo(generated.videoUrl, `${crypto.randomUUID()}.mp4`);
-      const completedJob = await createCompletedOrFailedJob({
-        status: "completed",
-        videoUrl: persistedUrl,
-        engineUsed: generated.engine
-      });
+    }
 
-      return NextResponse.json({
-        job: completedJob,
-        status: "completed"
-      });
-    } catch (engineError) {
-      const failedJob = await createCompletedOrFailedJob({
-        status: "failed",
-        engineUsed: selectedEngine,
-        errorMessage: engineError instanceof Error ? engineError.message : "Generation failed."
-      });
+    const assembledPrompt = payload.custom_prompt
+      ? payload.custom_prompt
+      : template
+        ? buildVideoPrompt(athlete as Athlete, template as unknown as Template)
+        : `${athlete.descriptor}. Cinematic quality, photorealistic, 4K.`;
 
+    const category = (template?.category as string) ?? "Custom";
+    const location = (template?.location as string) ?? "Studio";
+
+    console.log("[GENERATE] Athlete:", athlete.name, "| Mode:", template ? "template" : "custom");
+
+    const templateIdForCount = payload.templateId ?? "";
+    const countQuery = supabase
+      .from("jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("athlete_id", payload.athleteId);
+    if (templateIdForCount) {
+      countQuery.eq("template_id", templateIdForCount);
+    } else {
+      countQuery.is("template_id", null);
+    }
+    const { count: existingCount } = await countQuery;
+    const outputFilename = buildOutputFileName(athlete.name, `${category}-${location}`, existingCount ?? 0);
+
+    // Dry run mode — validate everything without calling Runway.
+    if (payload.dryRun) {
       return NextResponse.json({
-        job: failedJob,
-        status: "failed"
+        dryRun: true,
+        athleteName: athlete.name,
+        templateName: (template?.variant_name as string) ?? "custom",
+        prompt: assembledPrompt,
+        hasRunwayKey: true,
+        hasClaudeKey: !!workflow.anthropicApiKey
       });
     }
+
+    // Create the Runway task (returns immediately, no polling).
+    const runway = await createRunwayTaskOnly(runwayKey, {
+      prompt: assembledPrompt,
+      referencePhotoUrl: athlete.reference_photo_url
+    });
+
+    if (!runway.taskId || runway.taskId === "00000000-0000-0000-0000-000000000000") {
+      console.error("[GENERATE] Invalid runway task ID!", runway.taskId);
+      throw new Error(`Invalid Runway task ID returned: ${runway.taskId ?? "missing"}`);
+    }
+
+    console.log(`[GENERATE] Runway task created: ${runway.taskId}`);
+
+    // Create job in DB with the REAL Runway task ID.
+    const { data: job, error: createError } = await supabase
+      .from("jobs")
+      .insert({
+        athlete_id: athlete.id,
+        template_id: (template?.id as string) ?? null,
+        status: "processing",
+        assembled_prompt: assembledPrompt,
+        file_name: outputFilename,
+        retry_count: 0,
+        engine_used: "runway",
+        runway_task_id: runway.taskId
+      })
+      .select("*")
+      .single();
+
+    if (createError || !job) {
+      throw new Error(createError?.message ?? "Unable to create processing job.");
+    }
+
+    console.log(`[GENERATE] Job ${job.id} created with runway_task_id=${runway.taskId}`);
+
+    // Return immediately — frontend polls /api/jobs/[id]/status.
+    return NextResponse.json({
+      data: job,
+      polling: true
+    });
   } catch (error) {
     const { status, message } = mapApiError(error);
-    return NextResponse.json({ error: message }, { status });
+    const lower = message.toLowerCase();
+
+    // Surface credit errors clearly.
+    if (lower.includes("not enough credits") || lower.includes("insufficient credits")) {
+      return NextResponse.json(
+        { error: "Out of Runway credits. Add credits at dev.runwayml.com before generating.", code: "NO_CREDITS" },
+        { status: 402 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: message, _debugError: String(error) },
+      { status }
+    );
   }
 }
