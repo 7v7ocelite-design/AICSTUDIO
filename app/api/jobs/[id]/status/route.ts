@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import { RUNWAY_API_VERSION, RUNWAY_BASE_URL } from "@/lib/engines";
+import { serverEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -34,7 +35,9 @@ export async function GET(
       .select("key, value")
       .in("key", ["runway_api_key"]);
 
-    const runwayKey = settings?.find((s: { key: string; value: string }) => s.key === "runway_api_key")?.value;
+    const runwayKey =
+      settings?.find((s: { key: string; value: string }) => s.key === "runway_api_key")?.value
+      || serverEnv.runwayApiKey;
 
     if (runwayKey) {
       try {
@@ -50,7 +53,7 @@ export async function GET(
 
         const pollData = await pollRes.json();
         console.log(
-          `[STATUS] Job ${params.id}: Runway task ${job.runway_task_id} → ${pollData.status}`
+          `[STATUS] Job ${params.id}: Runway task ${job.runway_task_id} → ${pollData.status}, progress=${pollData.progress}`
         );
 
         if (pollData.status === "SUCCEEDED" && pollData.output?.length) {
@@ -94,6 +97,8 @@ export async function GET(
         console.error("[STATUS] Runway poll error:", message);
         return NextResponse.json({ ...job, status: "processing" });
       }
+    } else {
+      console.error("[STATUS] No Runway API key found in settings or env vars");
     }
   }
 
