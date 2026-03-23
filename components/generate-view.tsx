@@ -95,8 +95,13 @@ export const GenerateView = ({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ athleteId: selectedAthlete, templateId: selectedTemplate })
       });
-      const payload = await res.json();
-      if (!res.ok || !payload.data) throw new Error(payload.error ?? "Generation failed.");
+      const payload = (await res.json()) as { data?: Job; error?: string; code?: string; polling?: boolean };
+      if (!res.ok || !payload.data) {
+        if (payload.code === "NO_CREDITS") {
+          throw new Error(payload.error ?? "Out of Runway credits. Add credits at dev.runwayml.com before generating.");
+        }
+        throw new Error(payload.error ?? "Generation failed.");
+      }
       onJobCreated(payload.data as Job);
 
       if (payload.polling && payload.data.id) {

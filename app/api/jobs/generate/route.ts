@@ -213,6 +213,21 @@ export async function POST(request: NextRequest) {
     const errStack = err instanceof Error ? err.stack?.slice(0, 500) : "";
     console.error("[GENERATE] CATCH:", errMsg);
 
+    const lowerError = errMsg.toLowerCase();
+    if (
+      lowerError.includes("not enough credits") ||
+      lowerError.includes("insufficient credits") ||
+      lowerError.includes("insufficient_credits")
+    ) {
+      return NextResponse.json(
+        {
+          error: "Out of Runway credits. Add credits at dev.runwayml.com before generating.",
+          code: "NO_CREDITS"
+        },
+        { status: 402 }
+      );
+    }
+
     try {
       const supabase = getAdminSupabase();
       const payload = await request.clone().json() as GenerateBody;

@@ -80,16 +80,21 @@ export const ChatAssistant = ({ athletes, templates, accessToken, onJobCreated }
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(body)
       });
-      const payload = await res.json();
+      const payload = (await res.json()) as { data?: Job; error?: string; code?: string };
       if (res.ok && payload.data) {
-        toast(`Video generated: ${payload.data.status}`, "success");
-        onJobCreated(payload.data as Job);
+        const createdJob = payload.data;
+        toast(`Video generated: ${createdJob.status}`, "success");
+        onJobCreated(createdJob as Job);
         setMessages((prev) => [...prev, {
           role: "assistant",
-          content: `✅ Video generated! Status: **${payload.data.status}**. Check the job queue to review.`
+          content: `✅ Video generated! Status: **${createdJob.status}**. Check the job queue to review.`
         }]);
       } else {
-        toast(payload.error ?? "Generation failed.", "error");
+        if (payload.code === "NO_CREDITS") {
+          toast(payload.error ?? "Out of Runway credits. Add credits at dev.runwayml.com before generating.", "error");
+        } else {
+          toast(payload.error ?? "Generation failed.", "error");
+        }
       }
     } catch {
       toast("Generation request failed.", "error");

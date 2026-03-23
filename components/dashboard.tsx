@@ -85,8 +85,17 @@ export const Dashboard = ({ accessToken }: DashboardProps) => {
         body: JSON.stringify({ athleteId: aId, templateId: tId })
       });
 
-      const payload = (await response.json()) as { data?: Job; polling?: boolean; message?: string; error?: string };
+      const payload = (await response.json()) as {
+        data?: Job;
+        polling?: boolean;
+        message?: string;
+        error?: string;
+        code?: string;
+      };
       if (!response.ok || !payload.data) {
+        if (payload.code === "NO_CREDITS") {
+          throw new Error(payload.error ?? "Out of Runway credits. Add credits at dev.runwayml.com before generating.");
+        }
         throw new Error(payload.error ?? "Unable to generate video.");
       }
 

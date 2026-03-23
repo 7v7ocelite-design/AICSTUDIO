@@ -146,8 +146,11 @@ const StudioInner = () => {
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${ACCESS_TOKEN}` },
           body: JSON.stringify({ athleteId, templateId })
         });
-        const payload = await res.json();
+        const payload = (await res.json()) as { data?: Job; polling?: boolean; error?: string; code?: string };
         if (!res.ok || !payload.data) {
+          if (payload.code === "NO_CREDITS") {
+            throw new Error(payload.error ?? "Out of Runway credits. Add credits at dev.runwayml.com before generating.");
+          }
           throw new Error(payload.error ?? "Re-generation failed.");
         }
         handleJobCreated(payload.data as Job);
