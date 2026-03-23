@@ -80,8 +80,6 @@ export async function POST(request: NextRequest) {
     const location = (template?.location as string) ?? "Studio";
 
     console.log("[GENERATE] Athlete:", athlete.name, "| Mode:", template ? "template" : "custom");
-    console.log("[GENERATE] Runway key:", workflow.runwayApiKey ? "SET" : "NOT SET");
-    console.log("[GENERATE] Claude key:", workflow.anthropicApiKey ? "SET" : "NOT SET");
 
     // Claude prompt optimization
     let finalPrompt = assembledPrompt;
@@ -95,12 +93,11 @@ export async function POST(request: NextRequest) {
           platform: (template?.platforms as string) ?? "Instagram"
         });
         finalPrompt = optimized.optimizedPrompt;
-        console.log("[CLAUDE] Optimized:", finalPrompt.slice(0, 150));
+        console.log("[CLAUDE] Optimized prompt OK");
       } catch (err) {
         console.error("[CLAUDE] Optimization failed, using raw prompt:", err instanceof Error ? err.message : err);
       }
     }
-    console.log("[GENERATE] Final prompt:", finalPrompt.slice(0, 200));
 
     const templateIdForCount = payload.templateId ?? athlete.id;
     const { count: existingCount } = await supabase
@@ -112,110 +109,33 @@ export async function POST(request: NextRequest) {
 
     const outputFilename = buildOutputFileName(athlete.name, category, location, version);
 
-    // --- Background Polling Mode ---
-    // Create Runway task and return immediately. Frontend polls /api/jobs/[id]/status.
-    const apiKeys = {
-      kling: workflow.klingApiKey,
-      runway: workflow.runwayApiKey,
-      vidu: workflow.viduApiKey
-    };
+    // --- Resolve Runway API key with multiple fallbacks ---
+    let runwayKey = workflow.runwayApiKey || "";
+    const keySource: string[] = [];
 
-    if (!apiKeys.runway) {
-    // Last-resort: try reading directly from settingsMap and env
-    const directKey = settingsMap["runway_api_key"] || settingsMap["RUNWAY_API_KEY"] || "";
-    console.log("[GENERATE] apiKeys.runway is falsy. Direct DB lookup:", directKey ? "FOUND" : "MISSING");
-    console.log("[GENERATE] settingsMap keys:", JSON.stringify(Object.keys(settingsMap)));
-    console.log("[GENERATE] serverEnv.runwayApiKey:", serverEnv.runwayApiKey ? "SET" : "NOT SET");
-
-    if (directKey) {
-      apiKeys.runway = directKey;
-      console.log("[GENERATE] Recovered Runway key via direct lookup");
-    } else if (serverEnv.runwayApiKey) {
-      apiKeys.runway = serverEnv.runwayApiKey;
-      console.log("[GENERATE] Recovered Runway key via env var");
+    if (runwayKey) {
+      keySource.push("workflow");
+    } else {
+      // Try direct DB lookup
+      runwayKey = settingsMap["runway_api_key"] || "";
+      if (runwayKey) {
+        keySource.push("direct-db");
+      }
     }
-  }
-
-  if (!apiKeys.runway) {
-    // Still no key after all fallbacks — create mock job
-    const { id: jobId } = await createJob(supabase, {
-      athlete_id: athlete.id,
-      template_id: template?.id ?? null,
-      status: "approved",
-      assembled_prompt: finalPrompt,
-      output_filename: outputFilename,
-      retry_count: 0
-    });
-
-    const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
-    await updateJob(supabase, jobId, {
-      video_url: FALLBACK_VIDEO_URL,
-      engine_used: "runway (mock)",
-      face_score: 25,
-      reviewed_at: new Date().toISOString()
-    });
-
-    const finalJob = await fetchJob(supabase, jobId);
-    return NextResponse.json({
-      data: finalJob as Job,
-      _diagnostic: {
-        settingsMapKeys: Object.keys(settingsMap),
-        hasRunwayInMap: !!settingsMap["runway_api_key"],
-        workflowRunwaySet: !!workflow.runwayApiKey,
-        envRunwaySet: !!serverEnv.runwayApiKey
+    if (!runwayKey) {
+      // Try env var
+      runwayKey = serverEnv.runwayApiKey || "";
+      if (runwayKey) {
+        keySource.push("env");
       }
-    });
-  }
+    }
 
-    // Create the Runway task (takes <5 seconds)
-    try {
-      console.log("[GENERATE] Step 1: Importing engines...");
-      const { createRunwayTaskOnly } = await import("@/lib/engines");
-      
-      console.log("[GENERATE] Step 2: Creating Runway task...");
-      console.log("[GENERATE] API key present:", !!apiKeys.runway, "Prompt length:", finalPrompt.length);
-      const { taskId } = await createRunwayTaskOnly(apiKeys.runway, {
-        prompt: finalPrompt,
-        referencePhotoUrl: null
-      });
-      console.log("[GENERATE] Step 3: Runway task created:", taskId);
+    console.log(`[GENERATE] Runway key: ${runwayKey ? "SET" : "NOT SET"} (source: ${keySource.join(",") || "none"})`);
+    console.log(`[GENERATE] Settings keys in DB: ${JSON.stringify(Object.keys(settingsMap))}`);
 
-      console.log("[GENERATE] Step 4: Creating job in DB...");
-      const { id: jobId } = await createJob(supabase, {
-        athlete_id: athlete.id,
-        template_id: template?.id ?? null,
-        status: "processing",
-        assembled_prompt: finalPrompt,
-        output_filename: outputFilename,
-        retry_count: 0
-      });
-      console.log("[GENERATE] Step 5: Job created:", jobId);
-
-      console.log("[GENERATE] Step 6: Saving runway_task_id...");
-      const { error: updateError } = await supabase
-        .from("jobs")
-        .update({ runway_task_id: taskId, engine_used: "runway" })
-        .eq("id", jobId);
-      if (updateError) {
-        console.error("[GENERATE] Step 6 FAILED:", updateError.message);
-      }
-      console.log("[GENERATE] Step 7: Fetching final job...");
-
-      const finalJob = await fetchJob(supabase, jobId);
-      console.log("[GENERATE] Step 8: SUCCESS — returning with polling=true");
-      return NextResponse.json({
-        data: finalJob as Job,
-        polling: true,
-        message: `Video is generating. Poll /api/jobs/${jobId}/status every 10 seconds.`
-      });
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const errStack = err instanceof Error ? err.stack : "";
-      console.error("[GENERATE] CATCH BLOCK HIT:", errMsg);
-      console.error("[GENERATE] Stack:", errStack);
-
-      // Fallback to mock
-      const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
+    if (!runwayKey) {
+      // No Runway key anywhere — create mock job
+      console.log("[GENERATE] No Runway key found — returning mock");
       const { id: jobId } = await createJob(supabase, {
         athlete_id: athlete.id,
         template_id: template?.id ?? null,
@@ -225,18 +145,97 @@ export async function POST(request: NextRequest) {
         retry_count: 0
       });
 
+      const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
       await updateJob(supabase, jobId, {
         video_url: FALLBACK_VIDEO_URL,
-        engine_used: "runway (mock)",
+        engine_used: "runway (mock - no key)",
         face_score: 25,
         reviewed_at: new Date().toISOString()
       });
 
       const finalJob = await fetchJob(supabase, jobId);
-      return NextResponse.json({ data: finalJob as Job });
+      return NextResponse.json({
+        data: finalJob as Job,
+        _noKey: true,
+        _settingsKeys: Object.keys(settingsMap),
+        _keySource: keySource
+      });
     }
-  } catch (error) {
-    const { status, message } = mapApiError(error);
-    return NextResponse.json({ error: message }, { status });
+
+    // --- Create real Runway task ---
+    console.log("[GENERATE] Calling createRunwayTaskOnly...");
+    const { createRunwayTaskOnly } = await import("@/lib/engines");
+    const { taskId } = await createRunwayTaskOnly(runwayKey, {
+      prompt: finalPrompt,
+      referencePhotoUrl: null
+    });
+    console.log(`[GENERATE] Runway task created: ${taskId}`);
+
+    // Save job with processing status + runway task ID
+    const { id: jobId } = await createJob(supabase, {
+      athlete_id: athlete.id,
+      template_id: template?.id ?? null,
+      status: "processing",
+      assembled_prompt: finalPrompt,
+      output_filename: outputFilename,
+      retry_count: 0
+    });
+
+    await supabase
+      .from("jobs")
+      .update({ runway_task_id: taskId, engine_used: "runway" })
+      .eq("id", jobId);
+
+    console.log(`[GENERATE] Job ${jobId} created with runway_task_id=${taskId}`);
+
+    const finalJob = await fetchJob(supabase, jobId);
+    return NextResponse.json({
+      data: finalJob as Job,
+      polling: true,
+      message: `Video is generating. Poll /api/jobs/${jobId}/status every 10 seconds.`
+    });
+
+  } catch (err) {
+    // --- CATCH: Runway call or DB operation failed ---
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const errStack = err instanceof Error ? err.stack?.slice(0, 500) : "";
+    console.error("[GENERATE] CATCH:", errMsg);
+
+    try {
+      const supabase = getAdminSupabase();
+      const payload = await request.clone().json() as GenerateBody;
+
+      const { id: jobId } = await createJob(supabase, {
+        athlete_id: payload.athleteId,
+        template_id: payload.templateId ?? null,
+        status: "approved",
+        assembled_prompt: errMsg,
+        output_filename: "error-fallback.mp4",
+        retry_count: 0
+      });
+
+      const FALLBACK_VIDEO_URL = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
+      await updateJob(supabase, jobId, {
+        video_url: FALLBACK_VIDEO_URL,
+        engine_used: "runway (mock - error)",
+        face_score: 25,
+        error_message: errMsg,
+        reviewed_at: new Date().toISOString()
+      });
+
+      const finalJob = await fetchJob(supabase, jobId);
+      return NextResponse.json({
+        data: finalJob as Job,
+        _debugError: errMsg,
+        _debugStack: errStack
+      });
+    } catch (innerErr) {
+      return NextResponse.json({
+        error: "Complete failure",
+        _debugError: errMsg,
+        _debugStack: errStack,
+        _innerError: innerErr instanceof Error ? innerErr.message : String(innerErr)
+      }, { status: 500 });
+    }
   }
 }
