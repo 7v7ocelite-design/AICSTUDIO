@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
+import { serverEnv } from "@/lib/env";
 import { pollRunwayTask } from "@/lib/engines";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 
@@ -46,7 +47,10 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       return NextResponse.json(job);
     }
 
-    const runwayKey = settings?.find((setting) => setting.key === "runway_api_key")?.value ?? "";
+    const runwayKey =
+      settings?.find((setting) => setting.key === "runway_api_key")?.value ||
+      serverEnv.runwayApiKey ||
+      "";
     if (!runwayKey) {
       return NextResponse.json(job);
     }
