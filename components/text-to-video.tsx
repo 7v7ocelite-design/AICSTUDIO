@@ -74,12 +74,23 @@ export const TextToVideo = ({ athletes, accessToken, onJobCreated }: TextToVideo
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ athleteId: selectedAthlete, custom_prompt: prompt.trim(), duration: Number(duration), ratio })
       });
-      const payload = (await res.json()) as { data?: Job; error?: string; code?: string; polling?: boolean };
-      if (!res.ok || !payload.data) {
-        if (payload.code === "NO_CREDITS") {
-          throw new Error(payload.error ?? "Out of Runway credits. Add credits at dev.runwayml.com before generating.");
-        }
-        throw new Error(payload.error ?? "Generation failed.");
+
+      let payload: { data?: Job; error?: string; code?: string; polling?: boolean } | null = null;
+      try {
+        payload = (await res.json()) as { data?: Job; error?: string; code?: string; polling?: boolean };
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        const message = payload?.error ?? `Generation failed (HTTP ${res.status}).`;
+        toast(message, "error");
+        return;
+      }
+
+      if (!payload?.data) {
+        toast("Generation failed.", "error");
+        return;
       }
       onJobCreated(payload.data as Job);
 

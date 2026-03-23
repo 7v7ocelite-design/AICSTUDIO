@@ -81,9 +81,23 @@ export const AnimatePhoto = ({ athletes, accessToken, onJobCreated }: AnimatePho
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ athleteId: selectedAthlete, animationStyle: selectedPreset, motionPrompt: motionPrompt.trim() || null })
       });
-      const payload = await res.json();
-      if (!res.ok || !payload.data) {
-        throw new Error(payload.error ?? "Animation failed.");
+
+      let payload: { data?: Job; error?: string; polling?: boolean } | null = null;
+      try {
+        payload = (await res.json()) as { data?: Job; error?: string; polling?: boolean };
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        const message = payload?.error ?? `Animation failed (HTTP ${res.status}).`;
+        toast(message, "error");
+        return;
+      }
+
+      if (!payload?.data) {
+        toast("Animation failed.", "error");
+        return;
       }
       onJobCreated(payload.data as Job);
 
