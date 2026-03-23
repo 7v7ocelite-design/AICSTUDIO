@@ -35,8 +35,11 @@ export const AnimatePhoto = ({ athletes, accessToken, onJobCreated }: AnimatePho
       await new Promise((r) => setTimeout(r, 10000));
       try {
         const res = await fetch(`/api/jobs/${jobId}/status`);
-        const job = await res.json();
-        if (job.status === "completed") {
+        const job = (await res.json()) as Job & {
+          progress?: number | null;
+          _runway?: { progress?: number | null };
+        };
+        if (job.status === "completed" || job.status === "approved") {
           onJobCreated(job as Job);
           toast("Animation ready!", "success");
           return;
@@ -46,8 +49,21 @@ export const AnimatePhoto = ({ athletes, accessToken, onJobCreated }: AnimatePho
           toast(`Animation failed: ${job.error_message || "Unknown error"}`, "error");
           return;
         }
+        onJobCreated(job as Job);
         const elapsed = (i + 1) * 10;
-        toast(`Animating with Runway... (${elapsed}s elapsed)`, "info");
+        const rawProgress =
+          typeof job.progress === "number"
+            ? job.progress
+            : typeof job._runway?.progress === "number"
+              ? job._runway.progress
+              : null;
+        if (rawProgress !== null) {
+          const normalized = rawProgress <= 1 ? rawProgress * 100 : rawProgress;
+          const progressPercent = Math.max(0, Math.min(100, Math.round(normalized)));
+          toast(`Animating with Runway... (${progressPercent}% • ${elapsed}s elapsed)`, "info");
+        } else {
+          toast(`Animating with Runway... (${elapsed}s elapsed)`, "info");
+        }
       } catch {
         // Network error — keep trying
       }

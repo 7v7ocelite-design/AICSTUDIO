@@ -159,10 +159,20 @@ export const JobQueues = ({
           });
           if (!res.ok) return;
 
-          const data = (await res.json()) as Job & { progress?: number | null };
+          const data = (await res.json()) as Job & {
+            progress?: number | null;
+            _runway?: { progress?: number | null };
+          };
 
-          if (data.progress !== null && data.progress !== undefined) {
-            const normalizedProgress = data.progress <= 1 ? data.progress * 100 : data.progress;
+          const rawProgress =
+            typeof data.progress === "number"
+              ? data.progress
+              : typeof data._runway?.progress === "number"
+                ? data._runway.progress
+                : null;
+
+          if (rawProgress !== null) {
+            const normalizedProgress = rawProgress <= 1 ? Math.round(rawProgress * 100) : Math.round(rawProgress);
             const clampedProgress = Math.max(0, Math.min(100, normalizedProgress));
             setJobProgress((prev) => ({
               ...prev,
