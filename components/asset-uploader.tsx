@@ -6,7 +6,7 @@ import { Upload } from "lucide-react";
 const MAX_PHOTOS_PER_UPLOAD = 5;
 const MAX_VIDEO_DURATION = 15; // seconds
 const MAX_PHOTO_SIZE = 20 * 1024 * 1024; // 20MB
-const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_VIDEO_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
 
 interface AssetUploaderProps {
   ownerType: "athlete" | "brand";
@@ -75,7 +75,7 @@ export const AssetUploader = ({ ownerType, ownerId, accessToken, onUploadComplet
     const validVideos: File[] = [];
     for (const vid of videos) {
       if (vid.size > MAX_VIDEO_SIZE) {
-        errors.push(`"${vid.name}" exceeds 50MB limit.`);
+        errors.push(`"${vid.name}" exceeds 5GB limit.`);
         continue;
       }
       try {

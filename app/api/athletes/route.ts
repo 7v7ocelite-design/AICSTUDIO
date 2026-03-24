@@ -4,7 +4,7 @@ import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 
 const MAX_PHOTOS = 5;
-const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_VIDEO_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
 
 export async function POST(request: NextRequest) {
   try {

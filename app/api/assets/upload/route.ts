@@ -4,7 +4,7 @@ import { getAdminSupabase } from "@/lib/supabase/admin";
 
 const MAX_FILES_PER_UPLOAD = 6; // 5 photos + 1 video
 const MAX_PHOTO_SIZE = 20 * 1024 * 1024; // 20MB
-const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_VIDEO_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
       if (assetType === "video" && file.size > MAX_VIDEO_SIZE) {
-        errors.push(`${file.name}: exceeds 50MB video limit`);
+        errors.push(`${file.name}: exceeds 5GB video limit`);
         continue;
       }
 

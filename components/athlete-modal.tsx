@@ -9,7 +9,7 @@ import { useToast } from "@/components/toast";
 const MAX_PHOTOS = 5;
 const MAX_VIDEO_DURATION = 15; // seconds
 const MAX_PHOTO_SIZE = 20 * 1024 * 1024; // 20MB
-const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_VIDEO_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
 
 interface AthleteModalProps {
   accessToken: string;
@@ -63,7 +63,7 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
     setVideoError("");
 
     if (file.size > MAX_VIDEO_SIZE) {
-      setVideoError("Video must be under 50MB.");
+      setVideoError("Video must be under 5GB.");
       if (videoInputRef.current) videoInputRef.current.value = "";
       return;
     }
