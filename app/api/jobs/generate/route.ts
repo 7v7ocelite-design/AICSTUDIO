@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     }
     if (!athlete.consent_signed) {
       return NextResponse.json(
-        { error: "Cannot generate content — athlete has not signed a consent and usage release." },
+        { error: "Cannot generate content \u2014 athlete has not signed a consent and usage release." },
         { status: 403 }
       );
     }
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
     const version = (existingCount ?? 0) + 1;
     const outputFilename = buildOutputFileName(athlete.name, category, location, version);
 
-    // Dry run mode — validate everything without calling Runway.
+    // Dry run mode \u2014 validate everything without calling Runway.
     if (payload.dryRun) {
       return NextResponse.json({
         dryRun: true,
@@ -174,9 +174,19 @@ export async function POST(request: NextRequest) {
 
     console.log(`[GENERATE] Job ${job.id} created with runway_task_id=${runway.taskId}`);
 
-    // Return immediately — frontend polls /api/jobs/[id]/status.
+    // Return immediately \u2014 frontend polls /api/jobs/[id]/status.
+    // Attach athlete + template info so the frontend can display names
+    // without waiting for a bootstrap refresh.
+    const enrichedJob = {
+      ...job,
+      athlete: { name: athlete.name },
+      template: template
+        ? { variant_name: template.variant_name as string, category: template.category as string }
+        : null
+    };
+
     return NextResponse.json({
-      data: job,
+      data: enrichedJob,
       polling: true
     });
   } catch (error) {
