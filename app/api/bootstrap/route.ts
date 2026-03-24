@@ -5,7 +5,7 @@ import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import { seedDefaultTemplates } from "@/lib/seed-templates";
 import { publicEnv, serverEnv } from "@/lib/env";
-import type { DashboardBootstrap } from "@/lib/types";
+import type { DashboardBootstrap, Job } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -78,11 +78,11 @@ export async function GET(request: NextRequest) {
       (templates ?? []).map((t: { id: string; variant_name: string; category: string; location: string }) => [t.id, t])
     );
 
-    const jobs = (rawJobs ?? []).map((j: Record<string, unknown>) => {
+    const jobs: Job[] = (rawJobs ?? []).map((j) => {
       const ath = athleteMap.get(j.athlete_id as string);
       const tpl = templateMap.get(j.template_id as string);
       return {
-        ...j,
+        ...(j as unknown as Job),
         athlete: ath ? { name: ath.name } : null,
         template: tpl
           ? { variant_name: tpl.variant_name, category: tpl.category, location: tpl.location }
