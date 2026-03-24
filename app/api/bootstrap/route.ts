@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import { seedDefaultTemplates } from "@/lib/seed-templates";
-import type { DashboardBootstrap } from "@/lib/types";
+import type { DashboardBootstrap, Job } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +21,7 @@ export async function GET(request: NextRequest) {
       await seedDefaultTemplates(supabase);
     }
 
-    // NOTE: Fetch jobs WITHOUT PostgREST embedded JOINs to avoid stale schema cache.
-    // The JOIN queries (.select("*, athlete:athletes(name)")) return cached/stale data
-    // when the underlying row has been updated via a different query path.
-    // Instead, we fetch jobs plain and manually attach athlete/template names.
+    // Fetch jobs WITHOUT PostgREST embedded JOINs to avoid stale cache issue
     const [{ data: athletes, error: athleteError }, { data: templates, error: templateError }, { data: jobs, error: jobsError }, { data: settings, error: settingsError }] =
       await Promise.all([
         supabase.from("athletes").select("*").order("created_at", { ascending: false }),
@@ -43,28 +40,33 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Build lookup maps for manual join
-    const athleteMap = new Map((athletes ?? []).map((a) => [a.id, a.name]));
-    const templateMap = new Map((templates ?? []).map((t) => [t.id, { variant_name: t.variant_name, category: t.category, location: t.location }]));
-
-    // Manually attach athlete and template info to each job (same shape as PostgREST JOIN)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const enrichedJobs = (jobs ?? []).map((job) => ({
-      ...job,
-      athlete: job.athlete_id ? { name: athleteMap.get(job.athlete_id) ?? null } : null,
-      template: job.template_id ? templateMap.get(job.template_id) ?? null : null
-    }));
-
     const settingsMap = (settings ?? []).reduce<Record<string, string>>((accumulator, current) => {
       accumulator[current.key] = current.value;
       return accumulator;
     }, {});
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // Build lookup maps for manual join (avoids PostgREST embedded resource cache)
+    const athleteMap = new Map<string, string>();
+    for (const a of athletes ?? []) {
+      athleteMap.set(a.id, a.name);
+    }
+
+    const templateMap = new Map<string, { variant_name: string; category: string }>();
+    for (const t of templates ?? []) {
+      templateMap.set(t.id, { variant_name: t.variant_name, category: t.category });
+    }
+
+    // Manually attach athlete and template info to match Job type shape
+    const enrichedJobs: Job[] = (jobs ?? []).map((job) => ({
+      ...job,
+      athlete: job.athlete_id ? { name: athleteMap.get(job.athlete_id) ?? "Unknown" } : null,
+      template: job.template_id ? templateMap.get(job.template_id) ?? null : null
+    }));
+
     const payload: DashboardBootstrap = {
       athletes: athletes ?? [],
       templates: templates ?? [],
-      jobs: enrichedJobs as any,
+      jobs: enrichedJobs,
       settings: settingsMap
     };
 
