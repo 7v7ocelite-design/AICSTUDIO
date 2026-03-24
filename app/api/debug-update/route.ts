@@ -8,36 +8,38 @@ export async function GET(request: NextRequest) {
     const supabase = getAdminSupabase();
     const jobId = "44775a4f-6af8-497a-8f25-e00faebcfa13";
 
-    const { data: before, error: readErr } = await supabase
+    // Query 1: Plain select (like status endpoint)
+    const { data: plain, error: plainErr } = await supabase
       .from("jobs")
       .select("id, status, video_url, engine_used, error_message")
       .eq("id", jobId)
       .single();
 
-    const { data: updateData, error: updateErr } = await supabase
+    // Query 2: JOIN select (like bootstrap)
+    const { data: joined, error: joinErr } = await supabase
       .from("jobs")
-      .update({
-        status: "completed",
-        video_url: "https://test-debug.mp4",
-        engine_used: "debug-test",
-        error_message: null
-      })
+      .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
       .eq("id", jobId)
-      .select("id, status, video_url, engine_used, error_message")
       .single();
 
-    const { data: after, error: readAfterErr } = await supabase
+    // Query 3: All jobs with JOIN (exactly like bootstrap)
+    const { data: allJobs, error: allErr } = await supabase
       .from("jobs")
-      .select("id, status, video_url, engine_used, error_message")
-      .eq("id", jobId)
-      .single();
+      .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
+      .order("created_at", { ascending: false })
+      .limit(50);
 
     return NextResponse.json({
-      before: before || readErr?.message,
-      updateResult: updateData || null,
-      updateError: updateErr ? { message: updateErr.message, details: updateErr.details, hint: updateErr.hint, code: updateErr.code } : null,
-      after: after || readAfterErr?.message,
-      persisted: after?.status === "completed"
+      plain: plain ? { status: plain.status, video_url: plain.video_url ? "has_url" : "none", engine: plain.engine_used, error: plain.error_message } : plainErr?.message,
+      joined: joined ? { status: joined.status, video_url: joined.video_url ? "has_url" : "none", engine: joined.engine_used, error: joined.error_message } : joinErr?.message,
+      allJobsCount: allJobs?.length ?? 0,
+      allJobs: (allJobs ?? []).map((j) => ({
+        id: String(j.id).slice(0, 8),
+        status: j.status,
+        video_url: j.video_url ? "has_url" : "none",
+        engine: j.engine_used,
+        error: j.error_message
+      }))
     });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
