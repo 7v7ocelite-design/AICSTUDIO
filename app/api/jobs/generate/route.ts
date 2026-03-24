@@ -114,10 +114,35 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Prefer the canonical athlete field, but fall back to latest uploaded athlete photo asset.
+    let referencePhotoUrl: string | null = athlete.reference_photo_url;
+    if (!referencePhotoUrl) {
+      const { data: latestPhoto } = await supabase
+        .from("assets")
+        .select("url")
+        .eq("owner_type", "athlete")
+        .eq("owner_id", athlete.id)
+        .eq("asset_type", "photo")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const assetUrl = latestPhoto?.[0]?.url;
+      if (typeof assetUrl === "string" && assetUrl.length > 0) {
+        referencePhotoUrl = assetUrl;
+        console.log(`[GENERATE] Using fallback athlete photo from assets table for athlete ${athlete.id}`);
+
+        // Best-effort backfill so future requests use the canonical athlete field.
+        await supabase
+          .from("athletes")
+          .update({ reference_photo_url: assetUrl })
+          .eq("id", athlete.id);
+      }
+    }
+
     // Create the Runway task (returns immediately, no polling).
     const runway = await createRunwayTaskOnly(runwayKey, {
       prompt: assembledPrompt,
-      referencePhotoUrl: athlete.reference_photo_url
+      referencePhotoUrl
     });
 
     if (!runway.taskId || runway.taskId === "00000000-0000-0000-0000-000000000000") {
