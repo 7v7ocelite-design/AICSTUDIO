@@ -44,11 +44,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Build lookup maps for manual join
-    const athleteMap = new Map((athletes ?? []).map((a: Record<string, unknown>) => [a.id, a.name]));
-    const templateMap = new Map((templates ?? []).map((t: Record<string, unknown>) => [t.id, { variant_name: t.variant_name, category: t.category, location: t.location }]));
+    const athleteMap = new Map((athletes ?? []).map((a) => [a.id, a.name]));
+    const templateMap = new Map((templates ?? []).map((t) => [t.id, { variant_name: t.variant_name, category: t.category, location: t.location }]));
 
-    // Manually attach athlete and template info to each job
-    const enrichedJobs = (jobs ?? []).map((job: Record<string, unknown>) => ({
+    // Manually attach athlete and template info to each job (same shape as PostgREST JOIN)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const enrichedJobs = (jobs ?? []).map((job) => ({
       ...job,
       athlete: job.athlete_id ? { name: athleteMap.get(job.athlete_id) ?? null } : null,
       template: job.template_id ? templateMap.get(job.template_id) ?? null : null
@@ -59,10 +60,11 @@ export async function GET(request: NextRequest) {
       return accumulator;
     }, {});
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const payload: DashboardBootstrap = {
       athletes: athletes ?? [],
       templates: templates ?? [],
-      jobs: enrichedJobs,
+      jobs: enrichedJobs as any,
       settings: settingsMap
     };
 
