@@ -46,6 +46,12 @@ interface RunwayTaskCreateResponse {
 }
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+const FACE_PRESERVATION_PREFIX =
+  "Maintain exact facial features, face shape, and identity from the reference image throughout the entire video. ";
+
+const withFacePreservationPrompt = (prompt: string): string => {
+  return `${FACE_PRESERVATION_PREFIX}${prompt}`.slice(0, 1000);
+};
 
 const extractRunwayTaskId = (data: RunwayTaskCreateResponse): string | null => {
   const fromRoot = data.id ?? data.taskId;
@@ -178,9 +184,9 @@ export const generateImageToVideoWithRunway = async (
       "X-Runway-Version": RUNWAY_VERSION
     },
     body: JSON.stringify({
-      model: "gen4_turbo",
-      promptImage: imageUrl,
-      promptText: prompt,
+      model: "gen4.5",
+      promptImage: [{ uri: imageUrl, position: "first" }],
+      promptText: withFacePreservationPrompt(prompt),
       duration: 10,
       ratio: "1280:720"
     })
@@ -262,17 +268,17 @@ export const createRunwayTaskOnly = async (
     ? `${RUNWAY_BASE_URL}/image_to_video`
     : `${RUNWAY_BASE_URL}/text_to_video`;
 
-  const model = hasImage ? "gen4_turbo" : "gen3a_turbo";
+  const model = hasImage ? "gen4.5" : "gen3a_turbo";
 
   const body: Record<string, unknown> = {
     model,
-    promptText: input.prompt.slice(0, 1000),
+    promptText: hasImage ? withFacePreservationPrompt(input.prompt) : input.prompt.slice(0, 1000),
     duration: Math.min(input.durationSeconds ?? 10, 10),
     ratio: "1280:720"
   };
 
   if (hasImage) {
-    body.promptImage = input.referencePhotoUrl;
+    body.promptImage = [{ uri: input.referencePhotoUrl, position: "first" }];
   }
 
   console.log(`[RUNWAY] Creating task: ${endpoint} model=${model}`);
