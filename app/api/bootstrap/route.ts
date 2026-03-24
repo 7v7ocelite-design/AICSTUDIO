@@ -21,13 +21,17 @@ export async function GET(request: NextRequest) {
       await seedDefaultTemplates(supabase);
     }
 
+    // NOTE: Fetch jobs WITHOUT PostgREST embedded JOINs to avoid stale schema cache.
+    // The JOIN queries (.select("*, athlete:athletes(name)")) return cached/stale data
+    // when the underlying row has been updated via a different query path.
+    // Instead, we fetch jobs plain and manually attach athlete/template names.
     const [{ data: athletes, error: athleteError }, { data: templates, error: templateError }, { data: jobs, error: jobsError }, { data: settings, error: settingsError }] =
       await Promise.all([
         supabase.from("athletes").select("*").order("created_at", { ascending: false }),
         supabase.from("templates").select("*").order("category", { ascending: true }),
         supabase
           .from("jobs")
-          .select("*, athlete:athletes(name), template:templates(variant_name, category, location)")
+          .select("*")
           .order("created_at", { ascending: false })
           .limit(50),
         supabase.from("settings").select("key, value")
@@ -39,6 +43,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Build lookup maps for manual join
+    const athleteMap = new Map((athletes ?? []).map((a: Record<string, unknown>) => [a.id, a.name]));
+    const templateMap = new Map((templates ?? []).map((t: Record<string, unknown>) => [t.id, { variant_name: t.variant_name, category: t.category, location: t.location }]));
+
+    // Manually attach athlete and template info to each job
+    const enrichedJobs = (jobs ?? []).map((job: Record<string, unknown>) => ({
+      ...job,
+      athlete: job.athlete_id ? { name: athleteMap.get(job.athlete_id) ?? null } : null,
+      template: job.template_id ? templateMap.get(job.template_id) ?? null : null
+    }));
+
     const settingsMap = (settings ?? []).reduce<Record<string, string>>((accumulator, current) => {
       accumulator[current.key] = current.value;
       return accumulator;
@@ -47,7 +62,7 @@ export async function GET(request: NextRequest) {
     const payload: DashboardBootstrap = {
       athletes: athletes ?? [],
       templates: templates ?? [],
-      jobs: jobs ?? [],
+      jobs: enrichedJobs,
       settings: settingsMap
     };
 
