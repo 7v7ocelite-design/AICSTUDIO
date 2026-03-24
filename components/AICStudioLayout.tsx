@@ -61,14 +61,34 @@ const StudioInner = () => {
       // If job already exists, update it; otherwise prepend
       const exists = prev.jobs.some((j) => j.id === job.id);
       if (exists) {
-        return { ...prev, jobs: prev.jobs.map((j) => j.id === job.id ? job : j) };
+        // Merge: preserve athlete/template info from prior state if the
+        // incoming payload (e.g. from status polling) doesn't include them.
+        return {
+          ...prev,
+          jobs: prev.jobs.map((j) =>
+            j.id === job.id
+              ? { ...j, ...job, athlete: job.athlete ?? j.athlete, template: job.template ?? j.template }
+              : j
+          )
+        };
       }
       return { ...prev, jobs: [job, ...prev.jobs] };
     });
   };
 
   const handleJobUpdate = (updated: Job) => {
-    setData((prev) => prev ? { ...prev, jobs: prev.jobs.map((j) => j.id === updated.id ? updated : j) } : prev);
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            jobs: prev.jobs.map((j) =>
+              j.id === updated.id
+                ? { ...j, ...updated, athlete: updated.athlete ?? j.athlete, template: updated.template ?? j.template }
+                : j
+            )
+          }
+        : prev
+    );
   };
 
   const handleJobsCreated = (newJobs: Job[]) => {
@@ -127,12 +147,12 @@ const StudioInner = () => {
         if (rawProgress !== null) {
           const normalized = rawProgress <= 1 ? rawProgress * 100 : rawProgress;
           const progressPercent = Math.max(0, Math.min(100, Math.round(normalized)));
-          toast(`Generating with Runway... (${progressPercent}% • ${elapsed}s elapsed)`, "info");
+          toast(`Generating with Runway... (${progressPercent}% â¢ ${elapsed}s elapsed)`, "info");
         } else {
           toast(`Generating with Runway... (${elapsed}s elapsed)`, "info");
         }
       } catch {
-        // network error — keep trying
+        // network error â keep trying
       }
     }
     toast("Timed out waiting for video. Check job queue.", "error");
@@ -170,7 +190,7 @@ const StudioInner = () => {
   if (loading || !data) {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--bg-darkest)]">
-        <p className="text-sm text-secondary">Loading Content Studio…</p>
+        <p className="text-sm text-secondary">Loading Content Studioâ¦</p>
       </div>
     );
   }
