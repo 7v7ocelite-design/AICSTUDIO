@@ -9,7 +9,7 @@ import { useToast } from "@/components/toast";
 const MAX_PHOTOS = 5;
 const MAX_VIDEO_DURATION = 15; // seconds
 const MAX_PHOTO_SIZE = 20 * 1024 * 1024; // 20MB
-const MAX_VIDEO_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
+const MAX_VIDEO_SIZE = 5000 * 1024 * 1024; // 5GB
 
 interface AthleteModalProps {
   accessToken: string;
@@ -68,7 +68,6 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
       return;
     }
 
-    // Check duration using HTML5 video element
     const url = URL.createObjectURL(file);
     const videoEl = document.createElement("video");
     videoEl.preload = "metadata";
@@ -100,45 +99,7 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
     }
     setSaving(true);
     try {
-      let uploadedVideoPath: string | null = null;
-      let uploadedVideoFileName: string | null = null;
-      let uploadedVideoMimeType: string | null = null;
-      let uploadedVideoSize: number | null = null;
-
-      if (video) {
-        const signedRes = await fetch("/api/assets/signed-url", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`
-          },
-          body: JSON.stringify({
-            ownerType: "athlete",
-            ownerId: "pending",
-            filename: video.name,
-            contentType: video.type || "video/mp4"
-          })
-        });
-        const signedPayload = await signedRes.json();
-        if (!signedRes.ok || !signedPayload?.signedUrl || !signedPayload?.filePath) {
-          throw new Error(signedPayload?.error ?? "Failed to create signed upload URL for video.");
-        }
-
-        const uploadRes = await fetch(signedPayload.signedUrl as string, {
-          method: "PUT",
-          body: video,
-          headers: { "Content-Type": video.type || "video/mp4" }
-        });
-        if (!uploadRes.ok) {
-          throw new Error(`Video upload failed (HTTP ${uploadRes.status}).`);
-        }
-
-        uploadedVideoPath = signedPayload.filePath as string;
-        uploadedVideoFileName = video.name;
-        uploadedVideoMimeType = video.type || "video/mp4";
-        uploadedVideoSize = video.size;
-      }
-
+      // Step 1: Create athlete with photos (small files go through FormData)
       const formData = new FormData();
       formData.set("name", name.trim());
       formData.set("position", position.trim());
@@ -148,19 +109,10 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
       formData.set("style_preference", stylePreference.trim());
       formData.set("consent_signed", consentSigned ? "true" : "false");
 
-      // First photo becomes reference_photo, all photos go as reference_photos
       for (const photo of photos) {
         formData.append("reference_photos", photo);
       }
-      if (video) {
-        if (!uploadedVideoPath) {
-          throw new Error("Video upload path missing after upload.");
-        }
-        formData.set("reference_video_url", uploadedVideoPath);
-        formData.set("reference_video_filename", uploadedVideoFileName ?? "reference-video.mp4");
-        formData.set("reference_video_mime_type", uploadedVideoMimeType ?? "video/mp4");
-        formData.set("reference_video_size", String(uploadedVideoSize ?? 0));
-      }
+      // Don't send video through FormData — it bypasses Vercel's body limit via direct upload
 
       const res = await fetch("/api/athletes", {
         method: "POST",
@@ -169,6 +121,50 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
       });
       const payload = await res.json();
       if (!res.ok || !payload.data) throw new Error(payload.error ?? "Failed to create athlete.");
+
+      const athleteId = payload.data.id;
+
+      // Step 2: Direct-upload video to Supabase if present
+      if (video) {
+        toast("Uploading reference video...", "info");
+
+        const signedRes = await fetch("/api/assets/signed-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({
+            ownerType: "athlete",
+            ownerId: athleteId,
+            filename: video.name,
+            contentType: video.type || "video/mp4"
+          })
+        });
+
+        if (signedRes.ok) {
+          const { signedUrl, filePath } = await signedRes.json();
+
+          const uploadRes = await fetch(signedUrl, {
+            method: "PUT",
+            headers: { "Content-Type": video.type || "video/mp4" },
+            body: video
+          });
+
+          if (uploadRes.ok) {
+            await fetch("/api/assets/register", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+              body: JSON.stringify({
+                ownerType: "athlete",
+                ownerId: athleteId,
+                filePath,
+                filename: video.name,
+                fileSize: video.size,
+                mimeType: video.type,
+                assetType: "video"
+              })
+            });
+          }
+        }
+      }
 
       const fileCount = photos.length + (video ? 1 : 0);
       const mediaNote = fileCount > 0 ? ` ${photos.length} photo${photos.length !== 1 ? "s" : ""}${video ? " + video" : ""} uploaded.` : "";
@@ -231,7 +227,6 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
             </label>
           </div>
 
-          {/* Multi-Photo Upload */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs text-secondary">Reference Photos (up to {MAX_PHOTOS})</label>
@@ -262,7 +257,6 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
             <p className="text-[10px] text-muted">First photo becomes the primary reference. Upload from different angles for best results.</p>
           </div>
 
-          {/* Video Upload */}
           <div className="space-y-2">
             <label className="text-xs text-secondary">Reference Video (optional, max {MAX_VIDEO_DURATION}s)</label>
             {video ? (
