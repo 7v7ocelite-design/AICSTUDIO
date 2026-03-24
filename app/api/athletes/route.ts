@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 
+const MAX_PHOTOS = 5;
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
+
 export async function POST(request: NextRequest) {
   try {
     await requireAuthenticatedOperator(request);
@@ -15,15 +18,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Name and descriptor are required." }, { status: 400 });
     }
 
+    // Handle multiple reference photos (up to MAX_PHOTOS)
+    // Also support legacy single "reference_photo" field
+    const photoFiles: File[] = [];
+    const multiPhotos = formData.getAll("reference_photos") as File[];
+    for (const f of multiPhotos) {
+      if (f instanceof File && f.size > 0) photoFiles.push(f);
+    }
+    const singlePhoto = formData.get("reference_photo");
+    if (singlePhoto instanceof File && singlePhoto.size > 0 && photoFiles.length === 0) {
+      photoFiles.push(singlePhoto);
+    }
+    const photos = photoFiles.slice(0, MAX_PHOTOS);
+
+    // Handle optional reference video
+    const videoFile = formData.get("reference_video");
+    const hasVideo = videoFile instanceof File && videoFile.size > 0 && videoFile.size <= MAX_VIDEO_SIZE;
+
+    // Upload first photo as primary reference photo
     let referencePhotoUrl: string | null = null;
-    const referencePhoto = formData.get("reference_photo");
-    if (referencePhoto instanceof File && referencePhoto.size > 0) {
-      const extension = (referencePhoto.name.split(".").pop() ?? "jpg").toLowerCase();
+    if (photos.length > 0) {
+      const firstPhoto = photos[0];
+      const extension = (firstPhoto.name.split(".").pop() ?? "jpg").toLowerCase();
       const filePath = `athletes/${crypto.randomUUID()}.${extension}`;
-      const buffer = Buffer.from(await referencePhoto.arrayBuffer());
+      const buffer = Buffer.from(await firstPhoto.arrayBuffer());
       const upload = await supabase.storage.from("reference-photos").upload(filePath, buffer, {
         upsert: true,
-        contentType: referencePhoto.type || "image/jpeg"
+        contentType: firstPhoto.type || "image/jpeg"
       });
       if (!upload.error) {
         const { data } = supabase.storage.from("reference-photos").getPublicUrl(filePath);
@@ -31,6 +52,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Create athlete record
     const { data: athlete, error } = await supabase
       .from("athletes")
       .insert({
@@ -49,6 +71,61 @@ export async function POST(request: NextRequest) {
     if (error) {
       throw new Error(error.message);
     }
+
+    // Upload additional photos + video as assets
+    const athleteId = athlete.id;
+    const assetUploads: Promise<void>[] = [];
+
+    // Upload ALL photos (including first) as assets for the grid view
+    for (const photo of photos) {
+      assetUploads.push((async () => {
+        const ext = (photo.name.split(".").pop() ?? "jpg").toLowerCase();
+        const path = `athlete/${athleteId}/${Date.now()}_${crypto.randomUUID().slice(0, 8)}.${ext}`;
+        const buf = Buffer.from(await photo.arrayBuffer());
+        const { error: upErr } = await supabase.storage.from("assets").upload(path, buf, {
+          upsert: true,
+          contentType: photo.type || "image/jpeg"
+        });
+        if (upErr) return;
+        const { data: urlData } = supabase.storage.from("assets").getPublicUrl(path);
+        await supabase.from("assets").insert({
+          owner_type: "athlete",
+          owner_id: athleteId,
+          asset_type: "photo",
+          url: urlData.publicUrl,
+          filename: photo.name,
+          file_size: photo.size,
+          mime_type: photo.type
+        });
+      })());
+    }
+
+    // Upload video as asset
+    if (hasVideo && videoFile instanceof File) {
+      assetUploads.push((async () => {
+        const ext = (videoFile.name.split(".").pop() ?? "mp4").toLowerCase();
+        const path = `athlete/${athleteId}/${Date.now()}_${crypto.randomUUID().slice(0, 8)}.${ext}`;
+        const buf = Buffer.from(await videoFile.arrayBuffer());
+        const { error: upErr } = await supabase.storage.from("assets").upload(path, buf, {
+          upsert: true,
+          contentType: videoFile.type || "video/mp4"
+        });
+        if (upErr) return;
+        const { data: urlData } = supabase.storage.from("assets").getPublicUrl(path);
+        await supabase.from("assets").insert({
+          owner_type: "athlete",
+          owner_id: athleteId,
+          asset_type: "video",
+          url: urlData.publicUrl,
+          filename: videoFile.name,
+          file_size: videoFile.size,
+          mime_type: videoFile.type
+        });
+      })());
+    }
+
+    // Wait for asset uploads (best-effort)
+    await Promise.allSettled(assetUploads);
 
     return NextResponse.json({ data: athlete }, { status: 201 });
   } catch (error) {
