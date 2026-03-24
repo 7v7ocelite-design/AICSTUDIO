@@ -100,6 +100,45 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
     }
     setSaving(true);
     try {
+      let uploadedVideoPath: string | null = null;
+      let uploadedVideoFileName: string | null = null;
+      let uploadedVideoMimeType: string | null = null;
+      let uploadedVideoSize: number | null = null;
+
+      if (video) {
+        const signedRes = await fetch("/api/assets/signed-url", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            ownerType: "athlete",
+            ownerId: "pending",
+            filename: video.name,
+            contentType: video.type || "video/mp4"
+          })
+        });
+        const signedPayload = await signedRes.json();
+        if (!signedRes.ok || !signedPayload?.signedUrl || !signedPayload?.filePath) {
+          throw new Error(signedPayload?.error ?? "Failed to create signed upload URL for video.");
+        }
+
+        const uploadRes = await fetch(signedPayload.signedUrl as string, {
+          method: "PUT",
+          body: video,
+          headers: { "Content-Type": video.type || "video/mp4" }
+        });
+        if (!uploadRes.ok) {
+          throw new Error(`Video upload failed (HTTP ${uploadRes.status}).`);
+        }
+
+        uploadedVideoPath = signedPayload.filePath as string;
+        uploadedVideoFileName = video.name;
+        uploadedVideoMimeType = video.type || "video/mp4";
+        uploadedVideoSize = video.size;
+      }
+
       const formData = new FormData();
       formData.set("name", name.trim());
       formData.set("position", position.trim());
@@ -114,7 +153,13 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
         formData.append("reference_photos", photo);
       }
       if (video) {
-        formData.set("reference_video", video);
+        if (!uploadedVideoPath) {
+          throw new Error("Video upload path missing after upload.");
+        }
+        formData.set("reference_video_url", uploadedVideoPath);
+        formData.set("reference_video_filename", uploadedVideoFileName ?? "reference-video.mp4");
+        formData.set("reference_video_mime_type", uploadedVideoMimeType ?? "video/mp4");
+        formData.set("reference_video_size", String(uploadedVideoSize ?? 0));
       }
 
       const res = await fetch("/api/athletes", {

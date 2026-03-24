@@ -34,6 +34,8 @@ export async function POST(request: NextRequest) {
     // Handle optional reference video
     const videoFile = formData.get("reference_video");
     const hasVideo = videoFile instanceof File && videoFile.size > 0 && videoFile.size <= MAX_VIDEO_SIZE;
+    const referenceVideoUrlRaw = String(formData.get("reference_video_url") ?? "").trim();
+    const referenceVideoUrl = referenceVideoUrlRaw || null;
 
     // Upload first photo as primary reference photo
     let referencePhotoUrl: string | null = null;
@@ -100,8 +102,23 @@ export async function POST(request: NextRequest) {
       })());
     }
 
-    // Upload video as asset
-    if (hasVideo && videoFile instanceof File) {
+    // Register direct-uploaded video URL as asset
+    if (referenceVideoUrl) {
+      assetUploads.push((async () => {
+        await supabase.from("assets").insert({
+          owner_type: "athlete",
+          owner_id: athleteId,
+          asset_type: "video",
+          url: referenceVideoUrl,
+          filename: "reference_video",
+          file_size: null,
+          mime_type: "video/mp4"
+        });
+      })());
+    }
+
+    // Upload video as asset (legacy multipart flow)
+    if (!referenceVideoUrl && hasVideo && videoFile instanceof File) {
       assetUploads.push((async () => {
         const ext = (videoFile.name.split(".").pop() ?? "mp4").toLowerCase();
         const path = `athlete/${athleteId}/${Date.now()}_${crypto.randomUUID().slice(0, 8)}.${ext}`;

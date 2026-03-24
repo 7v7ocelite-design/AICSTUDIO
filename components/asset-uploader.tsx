@@ -33,6 +33,17 @@ function checkVideoDuration(file: File): Promise<number> {
   });
 }
 
+interface SignedUrlPayload {
+  signedUrl?: string;
+  filePath?: string;
+  token?: string;
+  error?: string;
+}
+
+interface RegisterPayload {
+  error?: string;
+}
+
 export const AssetUploader = ({ ownerType, ownerId, accessToken, onUploadComplete, accept = "image/*,video/*" }: AssetUploaderProps) => {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState("");
@@ -80,8 +91,7 @@ export const AssetUploader = ({ ownerType, ownerId, accessToken, onUploadComplet
       validVideos.push(vid);
     }
 
-    const allValid = [...sizedPhotos, ...validVideos];
-    if (allValid.length === 0) {
+    if (sizedPhotos.length === 0 && validVideos.length === 0) {
       setProgress(errors.join(" "));
       setTimeout(() => setProgress(""), 5000);
       if (inputRef.current) inputRef.current.value = "";
@@ -89,22 +99,104 @@ export const AssetUploader = ({ ownerType, ownerId, accessToken, onUploadComplet
     }
 
     setUploading(true);
-    setProgress(`Uploading ${allValid.length} file${allValid.length > 1 ? "s" : ""}...`);
+    const totalFiles = sizedPhotos.length + validVideos.length;
+    setProgress(`Uploading ${totalFiles} file${totalFiles > 1 ? "s" : ""}...`);
 
-    const formData = new FormData();
-    formData.append("owner_type", ownerType);
-    formData.append("owner_id", ownerId);
-    for (const file of allValid) formData.append("files", file);
+    const uploadErrors = [...errors];
 
-    try {
-      const res = await fetch("/api/assets/upload", { method: "POST", headers: { Authorization: `Bearer ${accessToken}` }, body: formData });
-      const data = await res.json();
-      const msg = data.error ? `Error: ${data.error}` : `${data.count} uploaded!`;
-      setProgress(errors.length > 0 ? `${msg} ${errors.join(" ")}` : msg);
-      if (!data.error) onUploadComplete();
-      setTimeout(() => setProgress(""), 5000);
-    } catch { setProgress("Upload failed"); }
-    finally { setUploading(false); if (inputRef.current) inputRef.current.value = ""; }
+    // Photos continue using existing API path.
+    if (sizedPhotos.length > 0) {
+      const formData = new FormData();
+      formData.append("owner_type", ownerType);
+      formData.append("owner_id", ownerId);
+      for (const file of sizedPhotos) formData.append("files", file);
+
+      try {
+        const res = await fetch("/api/assets/upload", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: formData
+        });
+        const data = await res.json();
+        if (data.error) {
+          uploadErrors.push(`Photo upload failed: ${data.error}`);
+        } else if (Array.isArray(data.warnings)) {
+          uploadErrors.push(...data.warnings.map((w: string) => `Photo: ${w}`));
+        }
+      } catch {
+        uploadErrors.push("Photo upload failed");
+      }
+    }
+
+    // Videos use direct-to-storage signed uploads.
+    for (const video of validVideos) {
+      try {
+        const signedRes = await fetch("/api/assets/signed-url", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            ownerType,
+            ownerId,
+            filename: video.name,
+            contentType: video.type || "video/mp4"
+          })
+        });
+        const signed = (await signedRes.json()) as SignedUrlPayload;
+        if (!signedRes.ok || !signed.signedUrl || !signed.filePath || !signed.token) {
+          throw new Error(signed.error ?? "Failed to obtain signed upload URL");
+        }
+
+        const uploadRes = await fetch(signed.signedUrl, {
+          method: "PUT",
+          headers: {
+            "Content-Type": video.type || "video/mp4",
+            "x-upsert": "true"
+          },
+          body: video
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Storage upload failed (HTTP ${uploadRes.status})`);
+        }
+
+        const registerRes = await fetch("/api/assets/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            ownerType,
+            ownerId,
+            filePath: signed.filePath,
+            filename: video.name,
+            fileSize: video.size,
+            mimeType: video.type || "video/mp4",
+            assetType: "video"
+          })
+        });
+        const registerPayload = (await registerRes.json()) as RegisterPayload;
+        if (!registerRes.ok) {
+          throw new Error(registerPayload.error ?? "Failed to register uploaded video");
+        }
+      } catch (err) {
+        uploadErrors.push(err instanceof Error ? `${video.name}: ${err.message}` : `${video.name}: upload failed`);
+      }
+    }
+
+    if (uploadErrors.length > 0) {
+      setProgress(`Upload finished with warnings. ${uploadErrors.join(" ")}`);
+    } else {
+      setProgress(`${totalFiles} uploaded!`);
+    }
+
+    onUploadComplete();
+    setTimeout(() => setProgress(""), 5000);
+    setUploading(false);
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   return (
