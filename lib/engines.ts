@@ -131,7 +131,7 @@ export const generateWithRunway = async (
       "X-Runway-Version": RUNWAY_VERSION
     },
     body: JSON.stringify({
-      model: "gen4.5",
+      model: "gen3a_turbo",
       promptText: prompt,
       duration: 10,
       ratio: "1280:720"
@@ -258,7 +258,7 @@ export const createRunwayTaskOnly = async (
     ? `${RUNWAY_BASE_URL}/image_to_video`
     : `${RUNWAY_BASE_URL}/text_to_video`;
 
-  const model = hasImage ? "gen4_turbo" : "gen4.5";
+  const model = hasImage ? "gen4_turbo" : "gen3a_turbo";
 
   const body: Record<string, unknown> = {
     model,
