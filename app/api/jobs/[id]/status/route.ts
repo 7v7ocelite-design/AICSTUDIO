@@ -8,14 +8,14 @@ import { getAdminSupabase } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const STALE_MINUTES = 15;
+const STALE_MINUTES = 30;
 
 const terminalStatuses = new Set([
   "approved",
   "rejected",
   "needs_review",
-  "completed",
-  "failed"
+  "completed"
+  // NOTE: "failed" is NOT terminal — we re-check Runway in case it completed after timeout
 ]);
 
 export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
@@ -37,25 +37,40 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       return NextResponse.json(job);
     }
 
-    if (job.status !== "processing" || !job.runway_task_id) {
+    // Recovery check: if job "failed" with timeout but has a real runway_task_id,
+    // re-poll Runway — the video may have completed after we gave up.
+    const isTimeoutFailure =
+      job.status === "failed" &&
+      job.runway_task_id &&
+      job.runway_task_id !== "00000000-0000-0000-0000-000000000000" &&
+      typeof job.error_message === "string" &&
+      job.error_message.includes("timed out");
+
+    if (job.status !== "processing" && !isTimeoutFailure) {
       return NextResponse.json(job);
     }
 
-    // Stale job timeout — auto-fail after STALE_MINUTES
-    const createdAt = new Date(job.created_at).getTime();
-    const elapsed = Date.now() - createdAt;
-    if (elapsed > STALE_MINUTES * 60 * 1000) {
-      const errorMessage = `Generation timed out after ${STALE_MINUTES} minutes.`;
-      await supabase
-        .from("jobs")
-        .update({ status: "failed", error_message: errorMessage })
-        .eq("id", params.id);
+    if (!job.runway_task_id || job.runway_task_id === "00000000-0000-0000-0000-000000000000") {
+      return NextResponse.json(job);
+    }
 
-      return NextResponse.json({
-        ...job,
-        status: "failed",
-        error_message: errorMessage
-      });
+    // Stale job timeout — auto-fail after STALE_MINUTES (skip for recovery checks)
+    if (!isTimeoutFailure) {
+      const createdAt = new Date(job.created_at).getTime();
+      const elapsed = Date.now() - createdAt;
+      if (elapsed > STALE_MINUTES * 60 * 1000) {
+        const errorMessage = `Generation timed out after ${STALE_MINUTES} minutes.`;
+        await supabase
+          .from("jobs")
+          .update({ status: "failed", error_message: errorMessage })
+          .eq("id", params.id);
+
+        return NextResponse.json({
+          ...job,
+          status: "failed",
+          error_message: errorMessage
+        });
+      }
     }
 
     const { data: settings, error: settingsError } = await supabase
