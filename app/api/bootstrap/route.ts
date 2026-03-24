@@ -1,76 +1,119 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 import { mapApiError, requireAuthenticatedOperator } from "@/lib/api";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import { seedDefaultTemplates } from "@/lib/seed-templates";
-import type { DashboardBootstrap, Job } from "@/lib/types";
+import { publicEnv, serverEnv } from "@/lib/env";
+import type { DashboardBootstrap } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
+/**
+ * Create a throwaway Supabase client whose every fetch() call uses
+ * { cache: "no-store" }.  This prevents Next.js from serving a
+ * cached response AND tells the runtime not to de-duplicate the
+ * request with any in-flight fetch for the same URL.
+ */
+const freshClient = () =>
+  createClient(publicEnv.supabaseUrl, serverEnv.serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: {
+      fetch: (url: RequestInfo | URL, init?: RequestInit) =>
+        fetch(url, { ...init, cache: "no-store" })
+    }
+  });
 
 export async function GET(request: NextRequest) {
   try {
     await requireAuthenticatedOperator(request);
-    const supabase = getAdminSupabase();
 
-    // Auto-seed templates on first load (before main queries)
-    const { count: templateCount } = await supabase
+    // Use the singleton for the seed check (cheap, idempotent)
+    const shared = getAdminSupabase();
+    const { count: templateCount } = await shared
       .from("templates")
       .select("id", { count: "exact", head: true });
 
     if ((templateCount ?? 0) === 0) {
-      await seedDefaultTemplates(supabase);
+      await seedDefaultTemplates(shared);
     }
 
-    // Fetch jobs WITHOUT PostgREST embedded JOINs to avoid stale cache issue
-    const [{ data: athletes, error: athleteError }, { data: templates, error: templateError }, { data: jobs, error: jobsError }, { data: settings, error: settingsError }] =
-      await Promise.all([
-        supabase.from("athletes").select("*").order("created_at", { ascending: false }),
-        supabase.from("templates").select("*").order("category", { ascending: true }),
-        supabase
-          .from("jobs")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(50),
-        supabase.from("settings").select("key, value")
-      ]);
+    // --- Fresh client for the real queries (no cache) ---
+    const supabase = freshClient();
+
+    // Fetch jobs WITHOUT PostgREST embedded JOINs to avoid query-plan
+    // cache returning stale rows.  We do manual lookups instead.
+    const [
+      { data: athletes, error: athleteError },
+      { data: templates, error: templateError },
+      { data: rawJobs, error: jobsError },
+      { data: settings, error: settingsError }
+    ] = await Promise.all([
+      supabase.from("athletes").select("*").order("created_at", { ascending: false }),
+      supabase.from("templates").select("*").order("category", { ascending: true }),
+      supabase
+        .from("jobs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50),
+      supabase.from("settings").select("key, value")
+    ]);
 
     if (athleteError || templateError || jobsError || settingsError) {
       throw new Error(
-        athleteError?.message || templateError?.message || jobsError?.message || settingsError?.message
+        athleteError?.message ||
+        templateError?.message ||
+        jobsError?.message ||
+        settingsError?.message
       );
     }
 
-    const settingsMap = (settings ?? []).reduce<Record<string, string>>((accumulator, current) => {
-      accumulator[current.key] = current.value;
-      return accumulator;
-    }, {});
+    // --- Manual joins: attach athlete name + template info to each job ---
+    const athleteMap = new Map(
+      (athletes ?? []).map((a: { id: string; name: string }) => [a.id, a])
+    );
+    const templateMap = new Map(
+      (templates ?? []).map((t: { id: string; variant_name: string; category: string; location: string }) => [t.id, t])
+    );
 
-    // Build lookup maps for manual join (avoids PostgREST embedded resource cache)
-    const athleteMap = new Map<string, string>();
-    for (const a of athletes ?? []) {
-      athleteMap.set(a.id, a.name);
-    }
+    const jobs = (rawJobs ?? []).map((j: Record<string, unknown>) => {
+      const ath = athleteMap.get(j.athlete_id as string);
+      const tpl = templateMap.get(j.template_id as string);
+      return {
+        ...j,
+        athlete: ath ? { name: ath.name } : null,
+        template: tpl
+          ? { variant_name: tpl.variant_name, category: tpl.category, location: tpl.location }
+          : null
+      };
+    });
 
-    const templateMap = new Map<string, { variant_name: string; category: string }>();
-    for (const t of templates ?? []) {
-      templateMap.set(t.id, { variant_name: t.variant_name, category: t.category });
-    }
-
-    // Manually attach athlete and template info to match Job type shape
-    const enrichedJobs: Job[] = (jobs ?? []).map((job) => ({
-      ...job,
-      athlete: job.athlete_id ? { name: athleteMap.get(job.athlete_id) ?? "Unknown" } : null,
-      template: job.template_id ? templateMap.get(job.template_id) ?? null : null
-    }));
+    const settingsMap = (settings ?? []).reduce<Record<string, string>>(
+      (accumulator, current) => {
+        accumulator[current.key] = current.value;
+        return accumulator;
+      },
+      {}
+    );
 
     const payload: DashboardBootstrap = {
       athletes: athletes ?? [],
       templates: templates ?? [],
-      jobs: enrichedJobs,
+      jobs,
       settings: settingsMap
     };
 
-    return NextResponse.json({ data: payload });
+    return NextResponse.json(
+      { data: payload },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+          Pragma: "no-cache"
+        }
+      }
+    );
   } catch (error) {
     const { status, message } = mapApiError(error);
     return NextResponse.json({ error: message }, { status });
