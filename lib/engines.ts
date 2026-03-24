@@ -78,6 +78,7 @@ const callEngine = async (
   try {
     const response = await fetch(endpoint, {
       method: "POST",
+    cache: "no-store",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`
@@ -125,6 +126,7 @@ export const generateWithRunway = async (
 
   const createRes = await fetch(`${RUNWAY_API_BASE}/text_to_video`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
@@ -169,6 +171,7 @@ export const generateImageToVideoWithRunway = async (
 
   const createRes = await fetch(`${RUNWAY_API_BASE}/image_to_video`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
@@ -205,6 +208,7 @@ export const generateImageToVideoWithRunway = async (
 
 export const pollRunwayTask = async (apiKey: string, taskId: string): Promise<RunwayTaskPollResult> => {
   const response = await fetch(`${RUNWAY_API_BASE}/tasks/${taskId}`, {
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "X-Runway-Version": RUNWAY_VERSION
@@ -275,6 +279,7 @@ export const createRunwayTaskOnly = async (
 
   const createRes = await fetch(endpoint, {
     method: "POST",
+    cache: "no-store",
     headers: runwayHeaders(apiKey),
     body: JSON.stringify(body)
   });

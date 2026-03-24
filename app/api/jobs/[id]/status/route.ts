@@ -6,6 +6,8 @@ import { pollRunwayTask } from "@/lib/engines";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
 export const maxDuration = 30;
 
 const STALE_MINUTES = 30;

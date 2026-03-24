@@ -7,6 +7,8 @@ import { getAdminSupabase } from "@/lib/supabase/admin";
 import type { Athlete, Template } from "@/lib/types";
 import { buildOutputFileName, parseWorkflowSettings } from "@/lib/workflow";
 
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 export const maxDuration = 55; // Stay under Vercel Hobby 60s limit
 
 interface GenerateBody {
