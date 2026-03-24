@@ -15,7 +15,7 @@ const terminalStatuses = new Set([
   "rejected",
   "needs_review",
   "completed"
-  // NOTE: "failed" is NOT terminal — we re-check Runway in case it completed after timeout
+  // NOTE: "failed" is NOT terminal \u2014 we re-check Runway in case it completed after timeout
 ]);
 
 export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
@@ -38,7 +38,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     }
 
     // Recovery check: if job "failed" with timeout but has a real runway_task_id,
-    // re-poll Runway — the video may have completed after we gave up.
+    // re-poll Runway \u2014 the video may have completed after we gave up.
     const isTimeoutFailure =
       job.status === "failed" &&
       job.runway_task_id &&
@@ -54,16 +54,17 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       return NextResponse.json(job);
     }
 
-    // Stale job timeout — auto-fail after STALE_MINUTES (skip for recovery checks)
+    // Stale job timeout \u2014 auto-fail after STALE_MINUTES (skip for recovery checks)
     if (!isTimeoutFailure) {
       const createdAt = new Date(job.created_at).getTime();
       const elapsed = Date.now() - createdAt;
       if (elapsed > STALE_MINUTES * 60 * 1000) {
         const errorMessage = `Generation timed out after ${STALE_MINUTES} minutes.`;
-        await supabase
+        const { error: staleErr } = await supabase
           .from("jobs")
           .update({ status: "failed", error_message: errorMessage })
           .eq("id", params.id);
+        if (staleErr) console.error(`[STATUS] Stale timeout update error:`, staleErr.message);
 
         return NextResponse.json({
           ...job,
@@ -95,7 +96,9 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
       if (runwayStatus === "SUCCEEDED" && Array.isArray(runwayData.output) && runwayData.output.length > 0) {
         const videoUrl = runwayData.output[0];
-        await supabase
+        console.log(`[STATUS] Runway SUCCEEDED for job ${params.id}, updating DB with video URL`);
+
+        const { error: updateError } = await supabase
           .from("jobs")
           .update({
             status: "completed",
@@ -104,6 +107,22 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
             error_message: null
           })
           .eq("id", params.id);
+
+        if (updateError) {
+          console.error(`[STATUS] DB update FAILED for job ${params.id}:`, updateError.message, updateError.details, updateError.hint);
+          // Fallback: try updating only safe columns (in case of PostgREST schema cache issue)
+          const { error: fallbackError } = await supabase
+            .from("jobs")
+            .update({ status: "completed", video_url: videoUrl, engine_used: "runway (live)" })
+            .eq("id", params.id);
+          if (fallbackError) {
+            console.error(`[STATUS] Fallback DB update also FAILED:`, fallbackError.message);
+          } else {
+            console.log(`[STATUS] Fallback update succeeded (without error_message null)`);
+          }
+        } else {
+          console.log(`[STATUS] DB update succeeded for job ${params.id}`);
+        }
 
         return NextResponse.json({
           ...job,
@@ -117,13 +136,14 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       if (runwayStatus === "FAILED") {
         const errorMessage =
           runwayData.failure || runwayData.failureCode || "Runway generation failed.";
-        await supabase
+        const { error: failUpdateErr } = await supabase
           .from("jobs")
           .update({
             status: "failed",
             error_message: errorMessage
           })
           .eq("id", params.id);
+        if (failUpdateErr) console.error(`[STATUS] Failed update error for job ${params.id}:`, failUpdateErr.message);
 
         return NextResponse.json({
           ...job,
