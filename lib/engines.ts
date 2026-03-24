@@ -8,6 +8,8 @@ export const RUNWAY_VERSION = "2024-11-06";
 export const RUNWAY_BASE_URL = RUNWAY_API_BASE;
 export const RUNWAY_API_VERSION = RUNWAY_VERSION;
 
+const FACE_PREFIX = "Maintain exact facial features, face shape, and identity from the reference image throughout the entire video. ";
+
 export interface EngineResult {
   engine: "kling" | "runway" | "vidu";
   videoUrl: string;
@@ -46,11 +48,9 @@ interface RunwayTaskCreateResponse {
 }
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
-const FACE_PRESERVATION_PREFIX =
-  "Maintain exact facial features, face shape, and identity from the reference image throughout the entire video. ";
 
 const withFacePreservationPrompt = (prompt: string): string => {
-  return `${FACE_PRESERVATION_PREFIX}${prompt}`.slice(0, 1000);
+  return (FACE_PREFIX + prompt).slice(0, 1000);
 };
 
 const extractRunwayTaskId = (data: RunwayTaskCreateResponse): string | null => {
@@ -84,7 +84,6 @@ const callEngine = async (
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-    cache: "no-store",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`
@@ -139,7 +138,7 @@ export const generateWithRunway = async (
       "X-Runway-Version": RUNWAY_VERSION
     },
     body: JSON.stringify({
-      model: "gen3a_turbo",
+      model: "gen4.5",
       promptText: prompt,
       duration: 10,
       ratio: "1280:720"
@@ -175,6 +174,8 @@ export const generateImageToVideoWithRunway = async (
     return { videoUrl: FALLBACK_VIDEO_URL };
   }
 
+  const fullPrompt = withFacePreservationPrompt(prompt);
+
   const createRes = await fetch(`${RUNWAY_API_BASE}/image_to_video`, {
     method: "POST",
     cache: "no-store",
@@ -186,7 +187,7 @@ export const generateImageToVideoWithRunway = async (
     body: JSON.stringify({
       model: "gen4.5",
       promptImage: [{ uri: imageUrl, position: "first" }],
-      promptText: withFacePreservationPrompt(prompt),
+      promptText: fullPrompt,
       duration: 10,
       ratio: "1280:720"
     })
@@ -268,11 +269,15 @@ export const createRunwayTaskOnly = async (
     ? `${RUNWAY_BASE_URL}/image_to_video`
     : `${RUNWAY_BASE_URL}/text_to_video`;
 
-  const model = hasImage ? "gen4.5" : "gen3a_turbo";
+  const model = hasImage ? "gen4.5" : "gen4.5";
+
+  const promptText = hasImage
+    ? withFacePreservationPrompt(input.prompt)
+    : input.prompt.slice(0, 1000);
 
   const body: Record<string, unknown> = {
     model,
-    promptText: hasImage ? withFacePreservationPrompt(input.prompt) : input.prompt.slice(0, 1000),
+    promptText,
     duration: Math.min(input.durationSeconds ?? 10, 10),
     ratio: "1280:720"
   };
