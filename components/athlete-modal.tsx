@@ -7,15 +7,9 @@ import type { Athlete } from "@/lib/types";
 import { useToast } from "@/components/toast";
 import {
   MEDIA_LIMITS,
-  buildRegisterBody,
   checkVideoDuration,
-  directUploadVideo
+  directUploadVideo,
 } from "@/lib/upload-contracts";
-
-const MAX_PHOTOS = MEDIA_LIMITS.maxPhotosPerUpload;
-const MAX_VIDEO_DURATION = MEDIA_LIMITS.maxVideoDurationSeconds;
-const MAX_PHOTO_SIZE = MEDIA_LIMITS.maxPhotoSizeBytes;
-const MAX_VIDEO_SIZE = MEDIA_LIMITS.maxVideoSizeBytes;
 
 interface AthleteModalProps {
   accessToken: string;
@@ -43,24 +37,27 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
 
-    const remaining = MAX_PHOTOS - photos.length;
+    const remaining = MEDIA_LIMITS.MAX_PHOTOS_PER_UPLOAD - photos.length;
     if (files.length > remaining) {
-      toast(`You can upload up to ${MAX_PHOTOS} photos total. ${remaining} slot${remaining !== 1 ? "s" : ""} remaining.`, "error");
+      toast(
+        `You can upload up to ${MEDIA_LIMITS.MAX_PHOTOS_PER_UPLOAD} photos total. ${remaining} slot${remaining !== 1 ? "s" : ""} remaining.`,
+        "error"
+      );
     }
 
     const toAdd = files.slice(0, remaining);
-    const oversized = toAdd.filter(f => f.size > MAX_PHOTO_SIZE);
+    const oversized = toAdd.filter((f) => f.size > MEDIA_LIMITS.MAX_PHOTO_SIZE);
     if (oversized.length > 0) {
       toast(`${oversized.length} photo(s) exceed 20MB and were skipped.`, "error");
     }
 
-    const valid = toAdd.filter(f => f.size <= MAX_PHOTO_SIZE);
-    setPhotos(prev => [...prev, ...valid]);
+    const valid = toAdd.filter((f) => f.size <= MEDIA_LIMITS.MAX_PHOTO_SIZE);
+    setPhotos((prev) => [...prev, ...valid]);
     if (photoInputRef.current) photoInputRef.current.value = "";
   };
 
   const removePhoto = (index: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== index));
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleVideoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -68,16 +65,16 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
     if (!file) return;
     setVideoError("");
 
-    if (file.size > MAX_VIDEO_SIZE) {
+    if (file.size > MEDIA_LIMITS.MAX_VIDEO_SIZE) {
       setVideoError("Video must be under 5GB.");
       if (videoInputRef.current) videoInputRef.current.value = "";
       return;
     }
 
     try {
-      const duration = await checkVideoDuration(file);
-      if (duration > MAX_VIDEO_DURATION) {
-        setVideoError(`Video is ${Math.round(duration)}s — max is ${MAX_VIDEO_DURATION}s.`);
+      const dur = await checkVideoDuration(file);
+      if (dur > MEDIA_LIMITS.MAX_VIDEO_DURATION) {
+        setVideoError(`Video is ${Math.round(dur)}s — max is ${MEDIA_LIMITS.MAX_VIDEO_DURATION}s.`);
         setVideo(null);
       } else {
         setVideo(file);
@@ -97,7 +94,7 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
     }
     setSaving(true);
     try {
-      // Step 1: Create athlete with photos (small files go through FormData)
+      // Step 1: Create athlete with photos (small files via FormData)
       const formData = new FormData();
       formData.set("name", name.trim());
       formData.set("position", position.trim());
@@ -106,16 +103,13 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
       formData.set("descriptor", descriptor.trim());
       formData.set("style_preference", stylePreference.trim());
       formData.set("consent_signed", consentSigned ? "true" : "false");
-
-      for (const photo of photos) {
-        formData.append("reference_photos", photo);
-      }
-      // Don't send video through FormData — it bypasses Vercel's body limit via direct upload
+      for (const photo of photos) formData.append("reference_photos", photo);
+      // Video NOT sent via FormData — goes direct to Supabase below
 
       const res = await fetch("/api/athletes", {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
-        body: formData
+        body: formData,
       });
       const payload = await res.json();
       if (!res.ok || !payload.data) throw new Error(payload.error ?? "Failed to create athlete.");
@@ -125,31 +119,17 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
       // Step 2: Direct-upload video to Supabase if present
       if (video) {
         toast("Uploading reference video...", "info");
-
-        const result = await directUploadVideo({
-          accessToken,
-          file: video,
-          ownerType: "athlete",
-          ownerId: athleteId
-        });
-
-        await fetch("/api/assets/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify(buildRegisterBody({
-            ownerType: "athlete",
-            ownerId: athleteId,
-            filePath: result.filePath,
-            filename: video.name,
-            fileSize: video.size,
-            mimeType: video.type,
-            assetType: "video"
-          }))
-        });
+        const result = await directUploadVideo(video, "athlete", athleteId, accessToken);
+        if (!result.success) {
+          console.error("[ATHLETE-MODAL] Video upload error:", result.error);
+        }
       }
 
       const fileCount = photos.length + (video ? 1 : 0);
-      const mediaNote = fileCount > 0 ? ` ${photos.length} photo${photos.length !== 1 ? "s" : ""}${video ? " + video" : ""} uploaded.` : "";
+      const mediaNote =
+        fileCount > 0
+          ? ` ${photos.length} photo${photos.length !== 1 ? "s" : ""}${video ? " + video" : ""} uploaded.`
+          : "";
       toast(`Athlete "${name}" created.${mediaNote}`, "success");
       onCreated(payload.data as Athlete);
       onClose();
@@ -209,10 +189,11 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
             </label>
           </div>
 
+          {/* Multi-Photo Upload */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-secondary">Reference Photos (up to {MAX_PHOTOS})</label>
-              <span className="text-[10px] text-muted">{photos.length}/{MAX_PHOTOS}</span>
+              <label className="text-xs text-secondary">Reference Photos (up to {MEDIA_LIMITS.MAX_PHOTOS_PER_UPLOAD})</label>
+              <span className="text-[10px] text-muted">{photos.length}/{MEDIA_LIMITS.MAX_PHOTOS_PER_UPLOAD}</span>
             </div>
             {photos.length > 0 && (
               <div className="grid grid-cols-5 gap-2">
@@ -224,23 +205,26 @@ export const AthleteModal = ({ accessToken, onClose, onCreated }: AthleteModalPr
                       type="button"
                       onClick={() => removePhoto(i)}
                       className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 bg-red-900/80 hover:bg-red-700 rounded text-[10px] text-white transition-opacity"
-                    ><Trash2 className="h-3 w-3" /></button>
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </div>
                 ))}
               </div>
             )}
-            {photos.length < MAX_PHOTOS && (
+            {photos.length < MEDIA_LIMITS.MAX_PHOTOS_PER_UPLOAD && (
               <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-neutral-600 bg-neutral-950 px-4 py-3 text-sm text-secondary hover:border-neutral-400">
                 <Upload className="h-4 w-4" />
-                {photos.length === 0 ? "Click to upload reference photos..." : `Add more photos (${MAX_PHOTOS - photos.length} remaining)...`}
+                {photos.length === 0 ? "Click to upload reference photos..." : `Add more photos (${MEDIA_LIMITS.MAX_PHOTOS_PER_UPLOAD - photos.length} remaining)...`}
                 <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoSelect} />
               </label>
             )}
             <p className="text-[10px] text-muted">First photo becomes the primary reference. Upload from different angles for best results.</p>
           </div>
 
+          {/* Video Upload */}
           <div className="space-y-2">
-            <label className="text-xs text-secondary">Reference Video (optional, max {MAX_VIDEO_DURATION}s)</label>
+            <label className="text-xs text-secondary">Reference Video (optional, max {MEDIA_LIMITS.MAX_VIDEO_DURATION}s)</label>
             {video ? (
               <div className="flex items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-neutral-950 px-4 py-3">
                 <Film className="h-4 w-4 text-purple-400 shrink-0" />

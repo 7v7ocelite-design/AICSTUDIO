@@ -1,16 +1,23 @@
+/* ═══════════════════════════════════════════════════════════
+ * upload-contracts.ts
+ * Single source of truth for media limits, upload API shapes,
+ * validation, and the client-side direct-upload helper.
+ * ═══════════════════════════════════════════════════════════ */
+
+/* ────────── Media Limits ────────── */
+
 export const MEDIA_LIMITS = {
-  maxPhotosPerUpload: 5,
-  maxFilesPerUpload: 6, // 5 photos + 1 video
-  maxVideoDurationSeconds: 15,
-  maxPhotoSizeBytes: 20 * 1024 * 1024, // 20MB
-  maxVideoSizeBytes: 5000 * 1024 * 1024 // 5GB
+  MAX_PHOTOS_PER_UPLOAD: 5,
+  MAX_VIDEO_DURATION: 15, // seconds
+  MAX_PHOTO_SIZE: 20 * 1024 * 1024, // 20 MB
+  MAX_VIDEO_SIZE: 5_000 * 1024 * 1024, // 5 GB (Supabase Pro)
+  MAX_FILES_PER_UPLOAD: 6, // 5 photos + 1 video
 } as const;
 
-export type OwnerType = "athlete" | "brand";
-export type AssetType = "photo" | "video" | "logo" | "document";
+/* ────────── /api/assets/signed-url ────────── */
 
 export interface SignedUrlRequest {
-  ownerType: OwnerType;
+  ownerType: "athlete" | "brand";
   ownerId: string;
   filename: string;
   contentType?: string;
@@ -23,107 +30,144 @@ export interface SignedUrlResponse {
   contentType: string;
 }
 
+export function validateSignedUrlRequest(
+  body: unknown
+): { data: SignedUrlRequest; error?: never } | { data?: never; error: string } {
+  if (!body || typeof body !== "object") return { error: "Invalid request body." };
+  const b = body as Record<string, unknown>;
+
+  if (!b.ownerType || (b.ownerType !== "athlete" && b.ownerType !== "brand")) {
+    return { error: "ownerType must be 'athlete' or 'brand'." };
+  }
+  if (typeof b.ownerId !== "string" || b.ownerId.length === 0) {
+    return { error: "ownerId is required." };
+  }
+  if (typeof b.filename !== "string" || b.filename.length === 0) {
+    return { error: "filename is required." };
+  }
+
+  return {
+    data: {
+      ownerType: b.ownerType as "athlete" | "brand",
+      ownerId: b.ownerId,
+      filename: b.filename,
+      contentType: typeof b.contentType === "string" ? b.contentType : undefined,
+    },
+  };
+}
+
+/* ────────── /api/assets/register ────────── */
+
 export interface RegisterAssetRequest {
-  ownerType: OwnerType;
+  ownerType: "athlete" | "brand";
   ownerId: string;
   filePath: string;
   filename: string;
-  fileSize?: number;
-  mimeType?: string;
-  assetType?: AssetType;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  assetType?: string;
 }
 
-export interface DirectUploadResult {
-  filePath: string;
+export interface RegisterAssetResponse {
+  asset: {
+    id: string;
+    owner_type: string;
+    owner_id: string;
+    asset_type: string;
+    url: string;
+    filename: string;
+    file_size: number | null;
+    mime_type: string | null;
+  };
 }
 
-export const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === "string" && value.trim().length > 0;
+export function validateRegisterRequest(
+  body: unknown
+): { data: RegisterAssetRequest; error?: never } | { data?: never; error: string } {
+  if (!body || typeof body !== "object") return { error: "Invalid request body." };
+  const b = body as Record<string, unknown>;
 
-export const isOwnerType = (value: unknown): value is OwnerType =>
-  value === "athlete" || value === "brand";
-
-export const isAssetType = (value: unknown): value is AssetType =>
-  value === "photo" || value === "video" || value === "logo" || value === "document";
-
-export const validateSignedUrlRequest = (payload: unknown): payload is SignedUrlRequest => {
-  if (!payload || typeof payload !== "object") return false;
-  const p = payload as Partial<SignedUrlRequest>;
-  return isOwnerType(p.ownerType) && isNonEmptyString(p.ownerId) && isNonEmptyString(p.filename);
-};
-
-export const validateRegisterAssetRequest = (payload: unknown): payload is RegisterAssetRequest => {
-  if (!payload || typeof payload !== "object") return false;
-  const p = payload as Partial<RegisterAssetRequest>;
-  const assetTypeOk = p.assetType === undefined || isAssetType(p.assetType);
-  return (
-    isOwnerType(p.ownerType) &&
-    isNonEmptyString(p.ownerId) &&
-    isNonEmptyString(p.filePath) &&
-    isNonEmptyString(p.filename) &&
-    assetTypeOk
-  );
-};
-
-export const inferAssetType = (file: File): AssetType => {
-  if (file.type.startsWith("image/")) return "photo";
-  if (file.type.startsWith("video/")) return "video";
-  if (file.name.toLowerCase().includes("logo")) return "logo";
-  return "document";
-};
-
-export const validateMediaSelection = async (rawFiles: File[]) => {
-  const photos = rawFiles.filter((f) => f.type.startsWith("image/"));
-  const videos = rawFiles.filter((f) => f.type.startsWith("video/"));
-  const errors: string[] = [];
-
-  if (photos.length > MEDIA_LIMITS.maxPhotosPerUpload) {
-    errors.push(
-      `Max ${MEDIA_LIMITS.maxPhotosPerUpload} photos per upload — only first ${MEDIA_LIMITS.maxPhotosPerUpload} kept.`
-    );
+  if (!b.ownerType || (b.ownerType !== "athlete" && b.ownerType !== "brand")) {
+    return { error: "ownerType must be 'athlete' or 'brand'." };
   }
-  const validPhotos = photos.slice(0, MEDIA_LIMITS.maxPhotosPerUpload);
+  if (typeof b.ownerId !== "string" || b.ownerId.length === 0) return { error: "ownerId is required." };
+  if (typeof b.filePath !== "string" || b.filePath.length === 0) return { error: "filePath is required." };
+  if (typeof b.filename !== "string" || b.filename.length === 0) return { error: "filename is required." };
 
-  const oversizedPhotos = validPhotos.filter((f) => f.size > MEDIA_LIMITS.maxPhotoSizeBytes);
-  if (oversizedPhotos.length > 0) {
-    errors.push(`${oversizedPhotos.length} photo(s) over 20MB skipped.`);
-  }
-  const sizedPhotos = validPhotos.filter((f) => f.size <= MEDIA_LIMITS.maxPhotoSizeBytes);
+  return {
+    data: {
+      ownerType: b.ownerType as "athlete" | "brand",
+      ownerId: b.ownerId,
+      filePath: b.filePath,
+      filename: b.filename,
+      fileSize: typeof b.fileSize === "number" ? b.fileSize : null,
+      mimeType: typeof b.mimeType === "string" ? b.mimeType : null,
+      assetType: typeof b.assetType === "string" ? b.assetType : "video",
+    },
+  };
+}
 
-  const validVideos: File[] = [];
-  for (const vid of videos) {
-    if (vid.size > MEDIA_LIMITS.maxVideoSizeBytes) {
-      errors.push(`"${vid.name}" exceeds 5GB limit.`);
-      continue;
-    }
-    try {
-      const dur = await checkVideoDuration(vid);
-      if (dur > MEDIA_LIMITS.maxVideoDurationSeconds) {
-        errors.push(`"${vid.name}" is ${Math.round(dur)}s — max ${MEDIA_LIMITS.maxVideoDurationSeconds}s.`);
-        continue;
-      }
-    } catch {
-      errors.push(`Could not read "${vid.name}" duration — skipped.`);
-      continue;
-    }
-    validVideos.push(vid);
+/* ────────── Client: direct-upload video to Supabase ────────── */
+
+export async function directUploadVideo(
+  file: File,
+  ownerType: string,
+  ownerId: string,
+  accessToken: string
+): Promise<{ success: boolean; error?: string }> {
+  // Step 1 — signed upload URL
+  const signedRes = await fetch("/api/assets/signed-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      ownerType,
+      ownerId,
+      filename: file.name,
+      contentType: file.type || "video/mp4",
+    } satisfies SignedUrlRequest),
+  });
+
+  if (!signedRes.ok) {
+    const err = await signedRes.json().catch(() => ({}));
+    return { success: false, error: (err as { error?: string }).error || "Failed to get upload URL" };
   }
 
-  return { sizedPhotos, validVideos, errors };
-};
+  const { signedUrl, filePath } = (await signedRes.json()) as SignedUrlResponse;
 
-// Backward-compatible alias for earlier refactors.
-export const splitAndValidateMediaSelection = validateMediaSelection;
+  // Step 2 — PUT directly to Supabase Storage
+  const uploadRes = await fetch(signedUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "video/mp4" },
+    body: file,
+  });
 
-export const buildRegisterBody = (input: RegisterAssetRequest): RegisterAssetRequest => ({
-  ownerType: input.ownerType,
-  ownerId: input.ownerId,
-  filePath: input.filePath,
-  filename: input.filename,
-  fileSize: input.fileSize,
-  mimeType: input.mimeType,
-  assetType: input.assetType
-});
+  if (!uploadRes.ok) {
+    return { success: false, error: `Storage upload failed: ${uploadRes.status}` };
+  }
+
+  // Step 3 — register metadata in DB
+  const registerRes = await fetch("/api/assets/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      ownerType,
+      ownerId,
+      filePath,
+      filename: file.name,
+      fileSize: file.size,
+      mimeType: file.type,
+      assetType: "video",
+    } satisfies RegisterAssetRequest),
+  });
+
+  if (!registerRes.ok) {
+    return { success: false, error: "File uploaded but metadata registration failed" };
+  }
+
+  return { success: true };
+}
+
+/* ────────── Client: check video duration ────────── */
 
 export function checkVideoDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -141,43 +185,3 @@ export function checkVideoDuration(file: File): Promise<number> {
     };
   });
 }
-
-export const directUploadVideo = async (params: {
-  accessToken: string;
-  ownerType: OwnerType;
-  ownerId: string;
-  file: File;
-  assetType?: AssetType;
-}): Promise<DirectUploadResult> => {
-  const signedRes = await fetch("/api/assets/signed-url", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${params.accessToken}`
-    },
-    body: JSON.stringify({
-      ownerType: params.ownerType,
-      ownerId: params.ownerId,
-      filename: params.file.name,
-      contentType: params.file.type || "video/mp4"
-    } satisfies SignedUrlRequest)
-  });
-
-  const signedPayload = (await signedRes.json()) as Partial<SignedUrlResponse> & { error?: string };
-  if (!signedRes.ok || !signedPayload.signedUrl || !signedPayload.filePath) {
-    throw new Error(signedPayload.error ?? "Failed to create signed upload URL.");
-  }
-
-  const uploadRes = await fetch(signedPayload.signedUrl, {
-    method: "PUT",
-    headers: {
-      "Content-Type": params.file.type || "video/mp4"
-    },
-    body: params.file
-  });
-  if (!uploadRes.ok) {
-    throw new Error(`Video upload failed (HTTP ${uploadRes.status}).`);
-  }
-
-  return { filePath: signedPayload.filePath };
-};

@@ -4,8 +4,8 @@ import { useState } from "react";
 import { Loader2, Info } from "lucide-react";
 
 import type { Athlete, Job } from "@/lib/types";
-import { pollUntilDone } from "@/hooks/use-job-polling";
 import { useToast } from "@/components/toast";
+import { pollUntilDone } from "@/hooks/use-job-polling";
 
 interface TextToVideoProps {
   athletes: Athlete[];
@@ -42,8 +42,7 @@ export const TextToVideo = ({ athletes, accessToken, onJobCreated }: TextToVideo
       }
 
       if (!res.ok) {
-        const message = payload?.error ?? `Generation failed (HTTP ${res.status}).`;
-        toast(message, "error");
+        toast(payload?.error ?? `Generation failed (HTTP ${res.status}).`, "error");
         return;
       }
 
@@ -55,24 +54,12 @@ export const TextToVideo = ({ athletes, accessToken, onJobCreated }: TextToVideo
 
       if (payload.polling && payload.data.id) {
         toast("Video generating with Runway... (2-4 minutes)", "info");
-        await pollUntilDone(payload.data.id, {
+        await pollUntilDone({
+          jobId: payload.data.id,
           accessToken,
+          onUpdate: (job) => onJobCreated(job),
+          onProgress: (msg, type) => toast(msg, type),
           actionLabel: "Generating",
-          onProcessing: (job, meta) => {
-            onJobCreated(job);
-            toast(meta.message, "info");
-          },
-          onDone: (job) => {
-            onJobCreated(job);
-            toast("Video ready!", "success");
-          },
-          onFailed: (job, message) => {
-            onJobCreated(job);
-            toast(`Generation failed: ${message}`, "error");
-          },
-          onTimeout: (message) => {
-            toast(message, "error");
-          }
         });
       } else {
         toast(`Video generated: ${payload.data.status}`, "success");
@@ -168,11 +155,11 @@ export const TextToVideo = ({ athletes, accessToken, onJobCreated }: TextToVideo
           <h3 className="text-xs font-semibold text-secondary">Prompt Tips</h3>
         </div>
         <ul className="space-y-1 text-[11px] text-muted">
-          <li>• Front-load the visual hook — what the viewer sees first</li>
-          <li>• Avoid close-ups of hands and teeth (top artifact zones)</li>
-          <li>• Include lighting and camera angle for consistency</li>
-          <li>• Add negatives at the end: &ldquo;No distortion, no extra limbs&rdquo;</li>
-          <li>• Start with the athlete&apos;s physical descriptor for likeness grounding</li>
+          <li>&bull; Front-load the visual hook &mdash; what the viewer sees first</li>
+          <li>&bull; Avoid close-ups of hands and teeth (top artifact zones)</li>
+          <li>&bull; Include lighting and camera angle for consistency</li>
+          <li>&bull; Add negatives at the end: &ldquo;No distortion, no extra limbs&rdquo;</li>
+          <li>&bull; Start with the athlete&apos;s physical descriptor for likeness grounding</li>
         </ul>
       </div>
     </div>

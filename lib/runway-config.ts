@@ -1,71 +1,87 @@
-export const RUNWAY_API_BASE = "https://api.dev.runwayml.com/v1";
-export const RUNWAY_API_VERSION = "2024-11-06";
-export const RUNWAY_MODEL = "gen4.5";
-export const RUNWAY_MAX_PROMPT_CHARS = 1000;
-export const RUNWAY_MAX_DURATION_SECONDS = 10;
-export const RUNWAY_DEFAULT_DURATION_SECONDS = 10;
-export const RUNWAY_DEFAULT_RATIO = "1280:720";
+import type { ContentTier } from "@/lib/types";
 
-export const FACE_PRESERVATION_PREFIX =
+/* ────────── Face identity preservation ────────── */
+
+/** Prepended to all image-based prompts for face accuracy. */
+export const FACE_PREFIX =
   "Maintain exact facial features, face shape, and identity from the reference image throughout the entire video. ";
 
-export const FALLBACK_VIDEO_URL =
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
+/* ────────── Runway API settings ────────── */
 
-// Backward-compatible aliases used by existing modules.
-export const RUNWAY_BASE_URL = RUNWAY_API_BASE;
-export const RUNWAY_VERSION = RUNWAY_API_VERSION;
-export const FACE_PREFIX = FACE_PRESERVATION_PREFIX;
+export const RUNWAY_API_BASE = "https://api.dev.runwayml.com/v1";
+export const RUNWAY_API_VERSION = "2024-11-06";
 
-export type RunwayTaskMode = "text_to_video" | "image_to_video";
+/* ────────── Per-endpoint config ────────── */
 
-export interface RunwayPayloadInput {
-  prompt: string;
-  referencePhotoUrl?: string | null;
-  durationSeconds?: number;
+export interface RunwayProfile {
+  endpoint: string;
+  model: string;
+  maxDuration: number;
+  defaultRatio: string;
 }
 
-export interface RunwayTaskPayload {
-  endpointPath: RunwayTaskMode;
-  hasReferenceImage: boolean;
-  body: Record<string, unknown>;
-}
+export const RUNWAY_PROFILES = {
+  text_to_video: {
+    endpoint: `${RUNWAY_API_BASE}/text_to_video`,
+    model: "gen4.5",
+    maxDuration: 10,
+    defaultRatio: "1280:720",
+  },
+  image_to_video: {
+    endpoint: `${RUNWAY_API_BASE}/image_to_video`,
+    model: "gen4.5",
+    maxDuration: 10,
+    defaultRatio: "1280:720",
+  },
+} as const satisfies Record<string, RunwayProfile>;
 
-const clampDuration = (value?: number): number => {
-  const duration = Math.floor(value ?? RUNWAY_DEFAULT_DURATION_SECONDS);
-  return Math.max(1, Math.min(RUNWAY_MAX_DURATION_SECONDS, duration));
+export type RunwayMode = keyof typeof RUNWAY_PROFILES;
+
+/* ────────── Engine priority by content tier ────────── */
+
+export const ENGINE_SEQUENCES: Record<ContentTier, Array<"kling" | "runway" | "vidu">> = {
+  premium: ["runway", "kling", "vidu"],
+  social: ["vidu", "kling", "runway"],
+  standard: ["kling", "vidu", "runway"],
 };
 
-export const buildRunwayPromptText = (prompt: string, includeFacePrefix: boolean): string => {
-  const base = includeFacePrefix ? `${FACE_PRESERVATION_PREFIX}${prompt}` : prompt;
-  return base.slice(0, RUNWAY_MAX_PROMPT_CHARS);
-};
+/* ────────── Shared helpers ────────── */
 
-export const buildRunwayTaskPayload = (input: RunwayPayloadInput): RunwayTaskPayload => {
-  const hasReferenceImage = Boolean(
-    input.referencePhotoUrl && input.referencePhotoUrl.startsWith("http")
-  );
+/** Standard Runway HTTP headers. */
+export const runwayHeaders = (apiKey: string) => ({
+  Authorization: `Bearer ${apiKey}`,
+  "Content-Type": "application/json",
+  "X-Runway-Version": RUNWAY_API_VERSION,
+});
 
-  const promptText = buildRunwayPromptText(input.prompt, hasReferenceImage);
+/**
+ * Build the request body for any Runway mode.
+ * For image_to_video: uses array promptImage format with position: "first"
+ * for best face identity preservation.
+ */
+export function buildRunwayPayload(
+  mode: RunwayMode,
+  prompt: string,
+  imageUrl?: string | null,
+  opts?: { duration?: number; ratio?: string }
+): Record<string, unknown> {
+  const profile = RUNWAY_PROFILES[mode];
 
   const body: Record<string, unknown> = {
-    model: RUNWAY_MODEL,
-    promptText,
-    duration: clampDuration(input.durationSeconds),
-    ratio: RUNWAY_DEFAULT_RATIO
+    model: profile.model,
+    promptText: prompt.slice(0, 1000),
+    duration: Math.min(opts?.duration ?? profile.maxDuration, profile.maxDuration),
+    ratio: opts?.ratio ?? profile.defaultRatio,
   };
 
-  if (hasReferenceImage && input.referencePhotoUrl) {
-    body.promptImage = [{ uri: input.referencePhotoUrl, position: "first" }];
+  if (mode === "image_to_video" && imageUrl) {
+    body.promptImage = [{ uri: imageUrl, position: "first" }];
   }
 
-  return {
-    endpointPath: hasReferenceImage ? "image_to_video" : "text_to_video",
-    hasReferenceImage,
-    body
-  };
-};
+  return body;
+}
 
-export const buildRunwayCreatePayload = (input: RunwayPayloadInput): Record<string, unknown> => {
-  return buildRunwayTaskPayload(input).body;
-};
+/** Prepend face-preservation instructions when an image reference is used. */
+export function withFacePrefix(prompt: string, hasImage: boolean): string {
+  return hasImage ? `${FACE_PREFIX}${prompt}` : prompt;
+}

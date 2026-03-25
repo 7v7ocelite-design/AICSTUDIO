@@ -62,8 +62,7 @@ export const GenerateView = ({
       }
 
       if (!res.ok) {
-        const message = payload?.error ?? `Generation failed (HTTP ${res.status}).`;
-        toast(message, "error");
+        toast(payload?.error ?? `Generation failed (HTTP ${res.status}).`, "error");
         return;
       }
 
@@ -76,11 +75,12 @@ export const GenerateView = ({
 
       if (payload.polling && payload.data.id) {
         toast("Video generating with Runway... (2-4 minutes)", "info");
-        await pollUntilDone(payload.data.id, {
+        await pollUntilDone({
+          jobId: payload.data.id,
           accessToken,
-          onUpdate: onJobCreated,
-          toast: (message, tone) => toast(message, tone),
-          actionLabel: "Generating"
+          onUpdate: (job) => onJobCreated(job),
+          onProgress: (msg, type) => toast(msg, type),
+          actionLabel: "Generating",
         });
       } else {
         toast(`Generation completed: ${payload.data.status}.`, "success");
@@ -108,7 +108,7 @@ export const GenerateView = ({
             <select className="input" value={selectedAthlete} onChange={(e) => setSelectedAthlete(e.target.value)}>
               <option value="">Select athlete</option>
               {athletes.map((a) => (
-                <option key={a.id} value={a.id}>{a.consent_signed ? "✓" : "✗"} {a.name}</option>
+                <option key={a.id} value={a.id}>{a.consent_signed ? "\u2713" : "\u2717"} {a.name}</option>
               ))}
             </select>
           </div>
@@ -117,9 +117,9 @@ export const GenerateView = ({
             <select className="input" value={selectedTemplate} onChange={(e) => setSelectedTemplate(e.target.value)}>
               <option value="">Select template</option>
               {groupedTemplates.map((g) => (
-                <optgroup key={g.category} label={`— ${g.category} —`}>
+                <optgroup key={g.category} label={`\u2014 ${g.category} \u2014`}>
                   {g.items.map((t) => (
-                    <option key={t.id} value={t.id}>{t.category} – {t.variant_name} ({t.content_tier})</option>
+                    <option key={t.id} value={t.id}>{t.category} \u2013 {t.variant_name} ({t.content_tier})</option>
                   ))}
                 </optgroup>
               ))}
@@ -142,7 +142,7 @@ export const GenerateView = ({
 
         {consentMissing && (
           <p className="rounded-lg border border-amber-700 bg-amber-950/60 px-3 py-2 text-sm text-amber-300">
-            ⚠ Consent release not signed. Upload signed release before generating content.
+            \u26a0 Consent release not signed. Upload signed release before generating content.
           </p>
         )}
       </div>
@@ -159,7 +159,7 @@ export const GenerateView = ({
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${scoreColor(job.face_score)}`}>
-                    {job.face_score?.toFixed(0) ?? "—"}%
+                    {job.face_score?.toFixed(0) ?? "\u2014"}%
                   </span>
                   <span className="text-[10px] text-muted">{job.engine_used ?? ""}</span>
                 </div>

@@ -64,10 +64,12 @@ export const JobQueues = ({
   const [activeTab, setActiveTab] = useState<QueueTab>(initialTab ?? "all");
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [creatingMock, setCreatingMock] = useState(false);
-  const { jobProgress } = useJobPolling({
+
+  // Shared polling hook — replaces ~130 lines of inline interval logic
+  const { jobProgress, getStatusText } = useJobPolling({
     jobs,
     accessToken,
-    onJobUpdate
+    onJobUpdate,
   });
 
   const autoApprove = Number(settings.auto_approve_threshold) || 90;
@@ -142,20 +144,6 @@ export const JobQueues = ({
     { id: "approval", label: "Approval Queue", count: approvalQueue.length },
     { id: "review", label: "Review Queue", count: reviewQueue.length }
   ];
-
-  const processingStatusText = (jobId: string): string | null => {
-    const state = jobProgress[jobId];
-    if (!state) return null;
-
-    const pct = `${Math.round(state.progress)}%`;
-    const status = state.runwayStatus;
-
-    if (status) {
-      return `Generating with Runway... (${state.elapsed}s elapsed · ${status} · ${pct})`;
-    }
-
-    return `Generating with Runway... (${state.elapsed}s elapsed · ${pct})`;
-  };
 
   return (
     <div className="panel space-y-4">
@@ -247,8 +235,8 @@ export const JobQueues = ({
                 {job.engine_used ?? "n/a"}
               </span>
             </p>
-            {job.status === "processing" && processingStatusText(job.id) ? (
-              <p className="mt-1 text-xs text-blue-300">{processingStatusText(job.id)}</p>
+            {job.status === "processing" && getStatusText(job.id) ? (
+              <p className="mt-1 text-xs text-blue-300">{getStatusText(job.id)}</p>
             ) : null}
             {job.output_filename && (
               <p className="text-xs font-mono text-slate-500 truncate" title={job.output_filename}>

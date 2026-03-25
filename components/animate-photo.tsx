@@ -49,8 +49,7 @@ export const AnimatePhoto = ({ athletes, accessToken, onJobCreated }: AnimatePho
       }
 
       if (!res.ok) {
-        const message = payload?.error ?? `Animation failed (HTTP ${res.status}).`;
-        toast(message, "error");
+        toast(payload?.error ?? `Animation failed (HTTP ${res.status}).`, "error");
         return;
       }
 
@@ -61,24 +60,13 @@ export const AnimatePhoto = ({ athletes, accessToken, onJobCreated }: AnimatePho
       onJobCreated(payload.data as Job);
 
       if (payload.polling || payload.data.status === "processing") {
-        await pollUntilDone(payload.data.id, {
+        toast("Animation generating with Runway... (2-4 minutes)", "info");
+        await pollUntilDone({
+          jobId: payload.data.id,
           accessToken,
+          onUpdate: (job) => onJobCreated(job),
+          onProgress: (msg, type) => toast(msg, type),
           actionLabel: "Animating",
-          onProcessing: (job, meta) => {
-            onJobCreated(job);
-            toast(meta.message, "info");
-          },
-          onDone: (job) => {
-            onJobCreated(job);
-            toast("Animation ready!", "success");
-          },
-          onFailed: (job, message) => {
-            onJobCreated(job);
-            toast(`Animation failed: ${message}`, "error");
-          },
-          onTimeout: (message) => {
-            toast(message, "error");
-          }
         });
       } else {
         toast(`Animation generated: ${payload.data.status}`, "success");
