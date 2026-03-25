@@ -1,12 +1,14 @@
 import type { ContentTier } from "@/lib/types";
+import {
+  FALLBACK_VIDEO_URL,
+  RUNWAY_API_BASE,
+  RUNWAY_API_VERSION,
+  RUNWAY_BASE_URL,
+  RUNWAY_VERSION,
+  buildRunwayCreatePayload
+} from "@/lib/runway-config";
 
-export const FALLBACK_VIDEO_URL =
-  "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4";
-
-export const RUNWAY_API_BASE = "https://api.dev.runwayml.com/v1";
-export const RUNWAY_VERSION = "2024-11-06";
-export const RUNWAY_BASE_URL = RUNWAY_API_BASE;
-export const RUNWAY_API_VERSION = RUNWAY_VERSION;
+export { FALLBACK_VIDEO_URL };
 
 export interface EngineResult {
   engine: "kling" | "runway" | "vidu";
@@ -125,6 +127,7 @@ export const generateWithRunway = async (
 
   const createRes = await fetch(`${RUNWAY_API_BASE}/text_to_video`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
@@ -169,18 +172,19 @@ export const generateImageToVideoWithRunway = async (
 
   const createRes = await fetch(`${RUNWAY_API_BASE}/image_to_video`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "X-Runway-Version": RUNWAY_VERSION
     },
-    body: JSON.stringify({
-      model: "gen4_turbo",
-      promptImage: imageUrl,
-      promptText: prompt,
-      duration: 10,
-      ratio: "1280:720"
-    })
+    body: JSON.stringify(
+      buildRunwayCreatePayload({
+        prompt,
+        referencePhotoUrl: imageUrl,
+        durationSeconds: 10
+      })
+    )
   });
 
   const data = (await createRes.json()) as RunwayTaskCreateResponse;
@@ -205,6 +209,7 @@ export const generateImageToVideoWithRunway = async (
 
 export const pollRunwayTask = async (apiKey: string, taskId: string): Promise<RunwayTaskPollResult> => {
   const response = await fetch(`${RUNWAY_API_BASE}/tasks/${taskId}`, {
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "X-Runway-Version": RUNWAY_VERSION
@@ -257,24 +262,18 @@ export const createRunwayTaskOnly = async (
   const endpoint = hasImage
     ? `${RUNWAY_BASE_URL}/image_to_video`
     : `${RUNWAY_BASE_URL}/text_to_video`;
-
-  const model = hasImage ? "gen4_turbo" : "gen4.5";
-
-  const body: Record<string, unknown> = {
-    model,
-    promptText: input.prompt.slice(0, 1000),
-    duration: Math.min(input.durationSeconds ?? 10, 10),
-    ratio: "1280:720"
-  };
-
-  if (hasImage) {
-    body.promptImage = input.referencePhotoUrl;
-  }
+  const body = buildRunwayCreatePayload({
+    prompt: input.prompt,
+    referencePhotoUrl: input.referencePhotoUrl ?? null,
+    durationSeconds: input.durationSeconds
+  });
+  const model = (body.model as string) ?? "gen4.5";
 
   console.log(`[RUNWAY] Creating task: ${endpoint} model=${model}`);
 
   const createRes = await fetch(endpoint, {
     method: "POST",
+    cache: "no-store",
     headers: runwayHeaders(apiKey),
     body: JSON.stringify(body)
   });
