@@ -82,3 +82,24 @@ export interface DashboardBootstrap {
   jobs: Job[];
   settings: Record<string, string>;
 }
+
+export interface AudioMessage {
+  id: string;
+  athlete_id: string;
+  title: string;
+  source_type: "recorded" | "uploaded" | "ai_generated";
+  audio_url: string | null;
+  duration_seconds: number | null;
+  transcript: string | null;
+  voice_clone_id: string | null;
+  created_at: string;
+}
+
+export interface VoiceClone {
+  id: string;
+  athlete_id: string;
+  voice_name: string;
+  elevenlabs_voice_id: string;
+  sample_count: number;
+  created_at: string;
+}
