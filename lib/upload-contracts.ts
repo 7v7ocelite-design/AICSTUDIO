@@ -111,7 +111,7 @@ export function validateRegisterRequest(
 
 export async function directUploadVideo(
   file: File,
-  ownerType: string,
+  ownerType: "athlete" | "brand",
   ownerId: string,
   accessToken: string
 ): Promise<{ success: boolean; error?: string }> {
