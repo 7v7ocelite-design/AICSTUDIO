@@ -14,7 +14,7 @@ export const createVoiceClone = async (
   formData.append("description", `AiC voice clone for ${name}`);
 
   for (const file of audioFiles) {
-    const blob = new Blob([file.buffer], { type: file.mimeType });
+    const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimeType });
     formData.append("files", blob, file.filename);
   }
 
